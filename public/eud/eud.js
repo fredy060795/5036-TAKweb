@@ -2889,11 +2889,8 @@ if (MESH_ONLY) {
     let ok = false;
     try { await fetch(new URL('icon-192.png?ping=' + Date.now(), u), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); ok = true; } catch (e) { /* offline */ }
     clearTimeout(t);
-    if (ok && invite) { // logged in right here – the bar only offers the full page (video, camera …)
-      radioJoin().catch(() => {});
-      $('onlineText').textContent = 'Internet: TAK server with this radio\'s login, right here. Full TAKweb (video, camera):';
-    }
-    $('onlineBar').classList.toggle('hidden', !ok || closed);
+    if (ok && invite) radioJoin().catch(() => {}); // logged in right here – no bar (full TAKweb: server button)
+    $('onlineBar').classList.toggle('hidden', !ok || closed || !!invite);
     radioOnline = ok && !closed;
     updatePermBar();
   }

@@ -318,14 +318,35 @@ async function syncPages(inst, chip) {
 }
 
 async function finishRadio(port, url, server, invite, ap, net = {}) {
-  let inst = null;
-  const link = new MI.SerialLink(port, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } });
-  inst = new MI.RadioInstaller({ P, send: b => link.send(b), log: t => log(t + '\n') });
-  await link.open();
+  let inst = null, link = null;
+  const info = net.info || port.getInfo();
+  const connect = async p => {
+    const l = new MI.SerialLink(p, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } });
+    inst = new MI.RadioInstaller({ P, send: b => l.send(b), log: t => log(t + '\n') });
+    await l.open();
+    link = l;
+  };
   try {
-    let st = null;
-    for (let t = 0; t < 4 && !st; t++) { try { st = await inst.readState(); } catch (e) { log('Radio still starting …\n'); await sleep(3000); } }
-    if (!st) throw new Error('The radio does not answer – it may still be starting. The firmware is on it; set the channel later in TAKweb (Meshtastic → Channel from a link).');
+    // the first start after a flash takes a while, and radios with USB in the chip (ESP32-S3: XIAO, T3S3, Heltec V3 …)
+    // come back on USB as a new port – maybe twice. So: a fresh connection on each try, up to 2.5 minutes.
+    let st = null, why = '';
+    const end = Date.now() + 150000;
+    for (let t = 0; !st && Date.now() < end; t++) {
+      try {
+        if (!link) {
+          if (t) port = await radioPortAgain(port, info, 20000);
+          await connect(port);
+        }
+        st = await inst.readState(t ? 20000 : 30000);
+      } catch (e) {
+        why = e.message || String(e);
+        log(`Radio still starting … (${why})\n`);
+        suSay(`The radio is starting – waiting for it (${Math.max(0, Math.round((end - Date.now()) / 1000))} s) …`);
+        if (link) { await link.close().catch(() => {}); link = null; }
+        await sleep(3000);
+      }
+    }
+    if (!st) throw Object.assign(new Error(`The radio does not answer (${why}). The firmware is on it: unplug the USB cable, plug it in again and press "Finish the setup" – no new flash needed.`), { finish: true });
     // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
     // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
     try { await syncPages(inst, net.chip); } catch (e) { log('Pages not updated: ' + (e.message || e) + '\n'); }
@@ -366,8 +387,41 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
     await sleep(800);
     await link.send(P.adminReboot(st.node, 2)); // the new WLAN name/password take effect after the restart
     return { names, ssid, node: st.node };
-  } finally { await link.close(); }
+  } finally { if (link) await link.close().catch(() => {}); }
 }
+
+// the part after the flash (server, TAK user, WLAN, channel, pages) – also again on its own, when the radio was slow
+let pendingFinish = null;
+async function finishSetup(f) {
+  const { names, ssid, node } = await finishRadio(f.port, f.chan, f.server, f.invite, f.ap, f.net);
+  // known in admin → Network (role, WLAN name) by its node id
+  api('mesh-radios', { method: 'POST', body: { node: P.nodeId(node), name: radioName(f.d), ssid, role: f.net.gateway ? 'gateway' : 'field', mqtt: !!f.net.mqtt } }).catch(() => {});
+  if (f.who) loadSetupUsers();
+  pendingFinish = null;
+  $('suFinish').classList.add('hidden');
+  suBar(100);
+  suSay(`Done! ${radioName(f.d)} has TAKweb${names.length ? ', the mesh channel ' + names.join(', ') : ''}${f.who ? ' and the TAK user ' + f.who.callsign : ''}. On the phone: WLAN "${ssid}"${f.ap.psk ? ` (password ${f.ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once${f.who ? '; with internet it logs in to the TAK server by itself' : ''}.`);
+}
+$('suFinish').addEventListener('click', async () => {
+  if (busy || !pendingFinish) return;
+  busy = true;
+  $('suFinish').disabled = true;
+  try {
+    // the port may be a new one after unplugging: the same one again, otherwise let the user choose it
+    let p = await radioPortAgain(pendingFinish.port, pendingFinish.info, 5000).catch(() => null);
+    if (!p) p = await navigator.serial.requestPort().catch(() => null);
+    if (!p) return;
+    pendingFinish.port = p;
+    suSay('Finishing the setup …');
+    await finishSetup(pendingFinish);
+  } catch (e) {
+    suSay('Not finished: ' + (e.message || e), false);
+    log('\nError: ' + (e.message || e) + '\n');
+  } finally {
+    busy = false;
+    $('suFinish').disabled = false;
+  }
+});
 
 $('suGo').addEventListener('click', async () => {
   const v = takwebVersion();
@@ -386,6 +440,8 @@ $('suGo').addEventListener('click', async () => {
   const gateway = $('suRole').value === 'gateway' ? { ssid: $('suGwSsid').value.trim(), psk: $('suGwPsk').value } : null;
   const wantMqtt = $('suMqtt').checked && !$('suMqtt').disabled;
   busy = true;
+  pendingFinish = null;
+  $('suFinish').classList.add('hidden');
   logTo = 'suLog';
   $('suGo').disabled = true;
   $('suLog').textContent = '';
@@ -432,16 +488,12 @@ $('suGo').addEventListener('click', async () => {
       const m = await api('mesh-mqtt/login', { method: 'POST', body: {} });
       mqtt = { address: m.address, username: m.username, password: m.password, root: m.root, tls: m.tls };
     }
-    let node;
-    ({ names, ssid, node } = await finishRadio(p2, chan, server, invite, ap, { mqtt, gateway, chip: d.chip }));
-    // known in admin → Network (role, WLAN name) by its node id
-    api('mesh-radios', { method: 'POST', body: { node: P.nodeId(node), name: radioName(d), ssid, role: gateway ? 'gateway' : 'field', mqtt: !!mqtt } }).catch(() => {});
-    if (who) loadSetupUsers();
-    suBar(100);
-    suSay(`Done! ${radioName(d)} has TAKweb${names.length ? ', the mesh channel ' + names.join(', ') : ''}${who ? ' and the TAK user ' + who.callsign : ''}. On the phone: WLAN "${ssid}"${ap.psk ? ` (password ${ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once${who ? '; with internet "TAKWEB ONLINE" logs in by itself' : ''}.`);
+    pendingFinish = { port: p2, info, chan, server, invite, ap, net: { mqtt, gateway, chip: d.chip, info }, d, who };
+    await finishSetup(pendingFinish);
   } catch (e) {
     suSay('Not finished: ' + (e.message || e), false);
     log('\nError: ' + (e.message || e) + '\n');
+    $('suFinish').classList.toggle('hidden', !pendingFinish);
   } finally {
     busy = false;
     $('suGo').disabled = !takwebVersion();
