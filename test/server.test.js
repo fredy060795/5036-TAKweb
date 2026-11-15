@@ -1227,3 +1227,18 @@ test('TAK access: registration -> approval with callsign -> access page with QR 
     mock.close();
   }
 });
+
+test('radio pages (takweb.local, private addresses) may use the EUD API from the phone, other sites not', async () => {
+  const pre = origin => fetch(base + '/api/eud/enroll', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
+  for (const o of ['https://takweb.local', 'https://172.20.10.14', 'http://192.168.4.1']) {
+    const r = await pre(o);
+    assert.equal(r.status, 204, o);
+    assert.equal(r.headers.get('access-control-allow-origin'), o);
+    assert.match(r.headers.get('access-control-allow-headers'), /Content-Type/i);
+  }
+  const evil = await fetch(base + '/api/eud/config', { headers: { Origin: 'https://evil.example' } });
+  assert.equal(evil.headers.get('access-control-allow-origin'), null, 'other sites get no permission');
+  const ok = await fetch(base + '/api/eud/config', { headers: { Origin: 'https://takweb.local' } });
+  assert.equal(ok.headers.get('access-control-allow-origin'), 'https://takweb.local');
+  assert.equal((await fetch(base + '/api/admin/state', { headers: { Origin: 'https://takweb.local' } })).headers.get('access-control-allow-origin'), null, 'never the admin');
+});

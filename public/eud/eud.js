@@ -49,6 +49,11 @@ const saveServers = () => store.set('eud.servers', servers);
 saveProfile();
 saveServers();
 
+// the TAKweb server that relays to the TAK server: this page's own server – on a radio's page (takweb.local) the TAKweb
+// server named on the radio, reached over the phone's mobile data (srv.relay; the server allows these pages, CORS)
+let RELAY = '';
+const relayUrl = (path, srv) => (srv && srv.relay) || RELAY ? new URL(path, (srv && srv.relay) || RELAY).href : path;
+
 function newServer(fields) {
   return Object.assign({
     id: rnd(4), name: '', host: '', port: 8089, proto: 'ssl', enrollPort: 8446, apiPort: 8443, username: '',
@@ -81,6 +86,7 @@ const TILE_BASE = new URL('tiles/', location.href).pathname; // /eud/tiles/
 // TAKweb loaded from a Meshtastic radio's flash (lib/meshsite.js): no TAKweb server – mesh only, map tiles straight from
 // the internet if the phone has any (kept on the phone for later), below them the offline world map from the radio
 const MESH_ONLY = !!window.TAKWEB_MESH;
+if (MESH_ONLY) { const r = servers.find(s => s.relay); if (r) RELAY = r.relay; } // the radio's TAK login (see radioJoin)
 const PUBLIC_TILES = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', topo: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
   sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -89,8 +95,17 @@ const PUBLIC_TILES = {
 if (MESH_ONLY) document.body.classList.add('mesh-only');
 // on the radio: a link to the TAKweb server that tells it about this radio – TAKweb online then talks to the mesh
 // through this radio over WLAN (Meshtastic → "Radio over WLAN"), login/QR/video come from the server
+// a server address without a path (only the domain) means TAKweb at /eud/ – the domain itself is the admin
+function eudUrl(u) {
+  if (!u) return u;
+  try {
+    const x = new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u);
+    if (x.pathname === '/' || x.pathname === '') x.pathname = '/eud/';
+    return x.href;
+  } catch (e) { return u; }
+}
 function radioLink(u) {
-  const x = new URL(u, location.href);
+  const x = new URL(eudUrl(u), location.href);
   const h = new URLSearchParams(x.hash.slice(1));
   h.set('radio', location.origin);
   x.hash = h.toString();
@@ -1145,7 +1160,8 @@ function openConn(srv) {
   clearTimeout(c.timer);
   if (!srv.auto || !srv.host) return updateStatus();
   if (c.ws && (c.ws.readyState === 0 || c.ws.readyState === 1)) return;
-  const sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/tak');
+  const rel = srv.relay ? new URL(srv.relay) : location;
+  const sock = new WebSocket((rel.protocol === 'https:' ? 'wss://' : 'ws://') + rel.host + '/ws/tak');
   c.ws = sock;
   c.state = 'connecting';
   c.message = '';
@@ -2024,7 +2040,7 @@ function saveDraft() {
 async function postJson(path, body) {
   let res;
   try {
-    res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    res = await fetch(/^\/api\//.test(path) ? relayUrl(path) : path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch (e) {
     throw new Error('Server not reachable – this needs a connection.');
   }
@@ -2781,7 +2797,7 @@ if (MESH_ONLY) {
     if (webUrl) return webUrl;
     const j = await radioFile();
     invite = j.invite || '';
-    return (webUrl = j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || '');
+    return (webUrl = eudUrl(j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || ''));
   };
   const goOnline = async () => { const u = await serverUrl(); if (u) location.href = radioLink(invite || u); };
   // server button: the known server with one tap, typing only when there is none (or for another server)
@@ -2801,10 +2817,71 @@ if (MESH_ONLY) {
   $('srvWebGo').addEventListener('click', () => {
     let u = $('srvWeb').value.trim();
     if (!u) return $('srvWeb').focus();
-    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    u = eudUrl(u);
     store.set('eud.webUrl', u);
     location.href = radioLink(u);
   });
+  // the radio's own TAK user: this page logs in to the TAK server itself (certificate, connection) – no page change.
+  // One login per radio: all radios answer as takweb.local (one origin for the browser), so the login is kept per
+  // radio user and switched when the phone is in another radio's WLAN.
+  let joining = false;
+  // this radio's callsign right away – also without internet (the mesh shows it too)
+  const radioCfg = async () => { await serverUrl(); try { return invite ? parseQr(invite) : null; } catch (e) { return null; } };
+  window.eudRadioInit = radioCfg().then(cfg => {
+    const key = cfg && cfg.username && cfg.host ? cfg.username + '@' + cfg.host : '';
+    // the login of another radio (this phone was in its WLAN before) goes before anything connects
+    if (servers.some(s => s.radioKey && s.radioKey !== key)) {
+      for (const s of servers.filter(x => x.radioKey && x.radioKey !== key)) closeSock(s);
+      servers = servers.filter(x => !x.radioKey || x.radioKey === key);
+      saveServers();
+    }
+    if (!key) return;
+    if (profile.radioKey !== key && cfg.callsign) { profile.callsign = cfg.callsign; profile.radioKey = key; saveProfile(); showMe(); }
+  }).catch(() => {});
+  async function radioJoin() {
+    const u = await serverUrl();
+    if (joining || !u || !invite) return;
+    let cfg;
+    try { cfg = parseQr(invite); } catch (e) { return; }
+    if (!cfg.host || !cfg.username || !cfg.password) return;
+    const relay = new URL(u).origin, key = cfg.username + '@' + cfg.host;
+    RELAY = relay;
+    for (const s of servers.filter(s => s.radioKey && s.radioKey !== key)) closeSock(s); // another radio's login
+    servers = servers.filter(s => !s.radioKey || s.radioKey === key);
+    let srv = servers.find(s => s.radioKey === key && s.certPem);
+    if (!srv) {
+      joining = true;
+      try {
+        srv = newServer({ name: new URL(u).host, host: cfg.host, port: cfg.port || 8089, proto: 'ssl', enrollPort: cfg.enrollPort || 8446, username: cfg.username, radioKey: key, relay });
+        for (let i = 0; i < 2; i++) {
+          try {
+            const r = await postJson('/api/eud/enroll', { host: srv.host, port: srv.enrollPort, username: srv.username, password: cfg.password, uid: profile.uid, caPems: srv.caPems, fingerprint: srv.fingerprint });
+            Object.assign(srv, { certPem: r.certPem, keyPem: r.keyPem, certInfo: r.info, enrollProfile: true, password: cfg.password });
+            addCas(srv, r.caPems);
+            break;
+          } catch (e) {
+            if (e.code !== 'UNTRUSTED' || i) throw e;
+            if (!await askTrust(`${srv.host}:${srv.enrollPort}`, e.fingerprint, e.subject)) return;
+            srv.fingerprint = e.fingerprint;
+          }
+        }
+        servers = servers.filter(s => s.radioKey !== key);
+        servers.push(srv);
+        saveServers();
+      } catch (e) {
+        toast('TAK server: ' + e.message, 5000);
+        return;
+      } finally { joining = false; }
+    }
+    srv.relay = relay;
+    if (profile.radioKey !== key) { // the callsign of this radio's user (the person may change it)
+      if (cfg.callsign) profile.callsign = cfg.callsign;
+      profile.radioKey = key;
+      saveProfile();
+      showMe();
+    }
+    if (!srv.auto || !['connected', 'connecting'].includes(connOf(srv).state)) connectServer(srv);
+  }
   async function checkOnline() {
     const u = await serverUrl();
     if (!u || closed) return;
@@ -2812,6 +2889,10 @@ if (MESH_ONLY) {
     let ok = false;
     try { await fetch(new URL('icon-192.png?ping=' + Date.now(), u), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); ok = true; } catch (e) { /* offline */ }
     clearTimeout(t);
+    if (ok && invite) { // logged in right here – the bar only offers the full page (video, camera …)
+      radioJoin().catch(() => {});
+      $('onlineText').textContent = 'Internet: TAK server with this radio\'s login, right here. Full TAKweb (video, camera):';
+    }
     $('onlineBar').classList.toggle('hidden', !ok || closed);
     radioOnline = ok && !closed;
     updatePermBar();
@@ -3095,7 +3176,7 @@ function videoItems() {
     .filter(v => v.url && !v.stale).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-window.eud = { sendChat, updatePermBar, videoItems, browserVideoUrl, $, store, profile, toast, setMsg, openPopup, closePopup, rnd, esc, map, handleCot, removeItem, askTrust, postJson, getServers: () => servers, saveServers, applyProfilePrefs, addTakMaps, forwardCot: xml => sendCot(xml, false), fmtDist, distance, bearing, askCompass, askDrone, destPoint, serverOnline,
+window.eud = { relayUrl: p => relayUrl(p), sendChat, updatePermBar, videoItems, browserVideoUrl, $, store, profile, toast, setMsg, openPopup, closePopup, rnd, esc, map, handleCot, removeItem, askTrust, postJson, getServers: () => servers, saveServers, applyProfilePrefs, addTakMaps, forwardCot: xml => sendCot(xml, false), fmtDist, distance, bearing, askCompass, askDrone, destPoint, serverOnline,
   sendCot, cotTime, saveProfile, closeSheets, setTool, setPitch, items, stopMeasure: () => { if (measuring) toggleMeasure(); }, getMe: () => me, battery: () => battery };
 
 loadPicture();
@@ -3128,6 +3209,7 @@ updateStatus();
       }
     } catch (e) { /* offline */ }
   }
+  if (MESH_ONLY && window.eudRadioInit) await window.eudRadioInit; // a radio's callsign first (set up in the admin)
   if (!handled) {
     if (!profile.callsign) openPopup('me');
     else if (!servers.length && !MESH_ONLY) openEdit(null);

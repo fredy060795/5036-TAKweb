@@ -88,7 +88,7 @@
 <div id="placeHint" class="hidden">Tap the map to place the marker</div>
 <div id="moveHint" class="hidden">Move <b id="moveName"></b>: drag it or tap the new position <button type="button" id="moveCancel" aria-label="Cancel">✕</button></div>
 <!-- on the radio with internet: TAKweb from the server (login, QR, video) – it stays connected to this radio -->
-<div id="onlineBar" class="hidden"><span>Internet available: log in to the TAK server, scan your QR code, video – open TAKweb online. The mesh stays connected.</span><button type="button" id="onlineGo">TAKWEB ONLINE</button><button type="button" id="onlineClose" aria-label="Close">✕</button></div>
+<div id="onlineBar" class="hidden"><span id="onlineText">Internet available: log in to the TAK server, scan your QR code, video – open TAKweb online. The mesh stays connected.</span><button type="button" id="onlineGo">TAKWEB ONLINE</button><button type="button" id="onlineClose" aria-label="Close">✕</button></div>
 <div id="permBar" class="hidden"><span id="permText"></span><button type="button" id="permGo">ALLOW</button><button type="button" id="permClose" aria-label="Close">✕</button></div>
 <div id="houndHint" class="hidden">Bloodhound: tap the target – a marker, a user or a point on the map <button type="button" id="houndPickCancel" aria-label="Cancel">✕</button></div>
 
@@ -419,12 +419,15 @@
         </details>
         <div class="kv"><span>Nodes heard (2 h)</span><b id="meshNodes">–</b></div>
         <div class="kv"><span>Sending via mesh</span><b id="meshSending">–</b></div>
-        <p class="hint hidden" id="meshBt">This browser has no Bluetooth. Android: use Chrome. iPhone: open TAKweb in the free "Bluefy" app.</p>
+        <p class="hint hidden" id="meshBt">This browser has no Bluetooth. Android: use Chrome. iPhone: easiest over WLAN (below) – or open TAKweb in the free "Bluefy" app.</p>
         <button type="button" class="mbtn hidden" id="meshBluefy">COPY LINK FOR BLUEFY</button>
         <button type="button" class="mbtn pri big" id="meshPick">CONNECT MESHTASTIC RADIO</button>
         <details class="hidden" id="meshWlan"><summary>Radio over WLAN</summary>
-          <p class="hint">A Meshtastic radio with WLAN on (e.g. on this phone's hotspot) has its own web server. Open its address once in
-            a tab and accept the certificate, then connect here.</p>
+          <p class="hint">A Meshtastic radio with WLAN on has its own web server – this also works on the iPhone (Safari has no
+            Bluetooth). 1. Set the radio's WLAN to this phone's hotspot (Meshtastic app → Config → Network: WiFi on, hotspot name and
+            password; on an iPhone also a fixed address 172.20.10.14 – TAKweb radios: admin or Meshtastic → "Internet over WLAN").
+            2. Switch the hotspot on and wait until the radio is connected. 3. Open its address once in a tab and accept the
+            certificate, then connect here.</p>
           <input id="meshHttp" placeholder="https://192.168.43.20" autocomplete="off">
           <button type="button" class="mbtn" id="meshWlanGo">CONNECT OVER WLAN</button>
         </details>

@@ -42,7 +42,12 @@
       this.volume = 1;
     }
 
-    url() { return this.o.url || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/voice'; }
+    url() {
+      if (this.o.url) return this.o.url;
+      // on a radio's page the TAKweb server named on the radio (its TAK login is there too)
+      const base = new URL(window.eud && window.eud.relayUrl ? window.eud.relayUrl('/ws/voice') : '/ws/voice', location.href);
+      return (base.protocol === 'https:' ? 'wss://' : 'ws://') + base.host + '/ws/voice';
+    }
     state(s, msg) { this.o.onState && this.o.onState(s, msg); }
 
     connect() {
@@ -400,7 +405,7 @@
     try {
       let sent = null;
       if (online) {
-        const res = await fetch('/api/eud/voicemsg', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wav(pcm) });
+        const res = await fetch((window.eud && window.eud.relayUrl ? window.eud.relayUrl('/api/eud/voicemsg') : '/api/eud/voicemsg'), { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wav(pcm) });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(d.error || 'Upload failed (' + res.status + ')');
         sent = E.sendChat(`🎤 Voice message ${fmtMs(ms)} ${d.url}`, { mesh: false });
