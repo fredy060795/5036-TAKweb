@@ -1886,19 +1886,20 @@ async function handle(req, res) {
       if (!admin) return json(res, 404, { error: 'Not found' });
       return await handleAdminApi(req, res, p.slice(11));
     }
-    if (p === '/api/app/register' && req.method === 'POST') return await handleRegister(req, res);
-    if (p.startsWith('/api/eud/')) {
+    // radio pages (takweb.local): the EUD API, the video sign-up and the access page's login data, from the phone
+    if (p.startsWith('/api/eud/') || p === '/api/app/register' || p.startsWith('/api/access/')) {
       const ro = radioOrigin(req.headers.origin);
       if (ro) {
         res.setHeader('Access-Control-Allow-Origin', ro);
         res.setHeader('Vary', 'Origin');
         if (req.method === 'OPTIONS') {
-          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '600' });
+          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token', 'Access-Control-Max-Age': '600' });
           return res.end();
         }
       }
-      return await handleEudApi(req, res, p.slice(9));
     }
+    if (p === '/api/app/register' && req.method === 'POST') return await handleRegister(req, res);
+    if (p.startsWith('/api/eud/')) return await handleEudApi(req, res, p.slice(9));
     if (p.startsWith('/api/access/')) return await handleAccessApi(req, res, p.slice(12));
     if (p === '/join' || p === '/access') return send(res, 302, '', 'text/plain', { Location: p + '/' });
     if (p.startsWith('/join/')) return serveStatic(res, 'join', decodeURIComponent(p.slice(6)));

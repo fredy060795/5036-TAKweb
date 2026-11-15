@@ -481,8 +481,9 @@ a.mbtn { color: #fff; text-decoration: none; box-sizing: border-box; }
 
 /* TAKweb loaded from a Meshtastic radio (mesh only): no server functions */
 body.mesh-only:not(.radio-relay) .tile[data-tb="server"], body.mesh-only .tile[data-tb="data"], body.mesh-only .tile[data-tb="overlays"],
-body.mesh-only .tile[data-tb="sync"], body.mesh-only .tile[data-tb="video"], body.mesh-only .tile[data-tb="voice"],
+body.mesh-only .tile[data-tb="sync"], body.mesh-only:not(.radio-relay) .tile[data-tb="video"], body.mesh-only .tile[data-tb="voice"],
 #srvMesh { display: none; }
 body.mesh-only #srvMesh { display: block; }
 body.mesh-only:not(.radio-relay) #srvList, body.mesh-only:not(.radio-relay) #addSrvBtn, body.mesh-only section[data-sec="server"] > .hint { display: none !important; }
-body.mesh-only #btnVideo, body.mesh-only [data-tbtool="voice"], body.mesh-only [data-tbtool="video"], body.mesh-only #appBox { display: none !important; }
+/* video (camera, helmet camera, watching feeds) through the TAKweb server named on the radio – over the phone's internet */
+body.mesh-only:not(.radio-relay) #btnVideo, body.mesh-only [data-tbtool="voice"], body.mesh-only:not(.radio-relay) [data-tbtool="video"], body.mesh-only #appBox { display: none !important; }
