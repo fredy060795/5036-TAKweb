@@ -86,7 +86,7 @@ const TILE_BASE = new URL('tiles/', location.href).pathname; // /eud/tiles/
 // TAKweb loaded from a Meshtastic radio's flash (lib/meshsite.js): no TAKweb server – mesh only, map tiles straight from
 // the internet if the phone has any (kept on the phone for later), below them the offline world map from the radio
 const MESH_ONLY = !!window.TAKWEB_MESH;
-if (MESH_ONLY) { const r = servers.find(s => s.relay); if (r) RELAY = r.relay; } // the radio's TAK login (see radioJoin)
+if (MESH_ONLY) { const r = servers.find(s => s.relay); if (r) { RELAY = r.relay; document.body.classList.add('radio-relay'); } } // the radio's TAK login (see radioJoin)
 const PUBLIC_TILES = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', topo: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
   sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -1948,8 +1948,9 @@ let draft = null;
 let draftOrig = null;
 
 function openEdit(srv) {
-  // on the radio (mesh only) there is no TAKweb server behind the page: servers are reached through the TAKweb server
-  if (MESH_ONLY) return openPopup('server');
+  // on the radio (mesh only) servers are reached through the TAKweb server named on the radio – without one, only the
+  // way to TAKweb online
+  if (MESH_ONLY && !RELAY) return openPopup('server');
   draftOrig = srv;
   draft = srv ? JSON.parse(JSON.stringify(srv)) : newServer();
   openPopup('edit', srv ? 'Edit server' : 'Add server');
@@ -2024,6 +2025,7 @@ $('editSave').addEventListener('click', () => {
 
 function saveDraft() {
   if (!draft.name) draft.name = draft.host;
+  if (MESH_ONLY && RELAY && !draft.relay) draft.relay = RELAY; // on the radio: through the TAKweb server named there
   if (draftOrig) {
     const keepAuto = draftOrig.auto;
     Object.assign(draftOrig, draft, { auto: keepAuto });
@@ -2237,7 +2239,7 @@ function parseQr(text) {
 
 // apply server data: into the open draft, otherwise into the matching or a new server
 async function applyConfig(cfg, auto) {
-  if (MESH_ONLY) { openPopup('server'); return; } // see openEdit
+  if (MESH_ONLY && !RELAY) { openPopup('server'); return; } // see openEdit
   if (!draft || popupSec !== 'edit') {
     const existing = servers.find(s => s.host === cfg.host && (!cfg.port || s.port === cfg.port));
     openEdit(existing || null);
@@ -2797,7 +2799,11 @@ if (MESH_ONLY) {
     if (webUrl) return webUrl;
     const j = await radioFile();
     invite = j.invite || '';
-    return (webUrl = eudUrl(j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || ''));
+    webUrl = eudUrl(j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || '');
+    // the TAKweb server relays to any TAK server it allows: other servers can be added here, like on the normal page
+    try { if (webUrl && !RELAY) RELAY = new URL(webUrl).origin; } catch (e) { /* invalid */ }
+    if (RELAY) document.body.classList.add('radio-relay');
+    return webUrl;
   };
   const goOnline = async () => { const u = await serverUrl(); if (u) location.href = radioLink(invite || u); };
   // server button: the known server with one tap, typing only when there is none (or for another server)
