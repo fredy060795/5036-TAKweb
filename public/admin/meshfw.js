@@ -346,7 +346,7 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
         await sleep(3000);
       }
     }
-    if (!st) throw Object.assign(new Error(`The radio does not answer (${why}). The firmware is on it: unplug the USB cable, plug it in again and press "Finish the setup" – no new flash needed.`), { finish: true });
+    if (!st) throw Object.assign(new Error(`The radio does not answer (${why}). The firmware is on it: press "3. Finish the setup" and choose the radio's port in the list – no new flash needed.`), { finish: true });
     // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
     // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
     try { await syncPages(inst, net.chip); } catch (e) { log('Pages not updated: ' + (e.message || e) + '\n'); }
@@ -404,16 +404,16 @@ async function finishSetup(f) {
 }
 $('suFinish').addEventListener('click', async () => {
   if (busy || !pendingFinish) return;
-  // choosing a port must happen right on the click (browser rule): ask first when the radio's port is not known
-  let p = pendingFinish.port;
-  if (!p) { try { p = await navigator.serial.requestPort(); } catch (e) { return; } }
+  // after the flash the radio is often a new USB device (the old port is gone): always let the user choose it – on
+  // the click itself (browser rule)
+  let p;
+  try { p = await navigator.serial.requestPort(); } catch (e) { return; } // list closed
   await guarded(async () => {
-    const again = await radioPortAgain(p, pendingFinish.info || p.getInfo(), 8000).catch(() => null);
-    if (!again) {
-      pendingFinish.port = null; // next click: choose it
-      throw new Error('The radio is not on its USB port – unplug and plug in the cable, then press "3. Finish the setup" again and choose it.');
-    }
+    const again = await radioPortAgain(p, p.getInfo(), 15000).catch(() => null);
+    if (!again) throw new Error('This port does not open – wait until the radio has started (its display / LED), then press "3. Finish the setup" again.');
     pendingFinish.port = again;
+    pendingFinish.info = again.getInfo();
+    pendingFinish.net.info = pendingFinish.info;
     suSay('Finishing the setup …');
     await finishSetup(pendingFinish);
   });
@@ -466,12 +466,20 @@ async function afterFlash(job) {
   await sleep(6000);
   // the Meshtastic port: the one chosen first (if that was not the boot mode), otherwise any allowed port that is not boot mode
   const app = job.appInfo;
+  const replug = 'Flashed. Unplug the USB cable and plug it in again – the radio starts Meshtastic (about 10 s). Then press ' +
+    '"3. Finish the setup" and choose the radio in the list (the entry that came with plugging in; no new flash).';
+  if (!app && job.flashed && job.flashed.getInfo().usbVendorId === ESPRESSIF) {
+    // flashed in boot mode without knowing the Meshtastic port: after a fresh start the user chooses it
+    pendingFinish = { port: null, info: null, chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip }, d: job.d, who };
+    showStep('suFinish');
+    throw new Error(replug);
+  }
   const fits = (i, p) => (app ? i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId : i.usbVendorId !== ESPRESSIF || p === job.flashed);
   const p2 = await allowedPort(fits, 45000);
   pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app }, d: job.d, who };
   if (!p2) {
     showStep('suFinish');
-    throw new Error('The radio runs again, but on a USB port this page may not use yet. Press "3. Finish the setup" and choose it in the list (no new flash).');
+    throw new Error(replug);
   }
   suBar(90);
   await finishSetup(pendingFinish);
