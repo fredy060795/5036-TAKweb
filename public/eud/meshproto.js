@@ -191,6 +191,11 @@
       return { kind: 'channel', channel: { index: i32(c, 1), role: u32(c, 3), name: s ? str(s, 3) : '', key } };
     }
     if (has(f, 7)) return { kind: 'configComplete', id: u32(f, 7) };
+    if (has(f, 9)) { // ModuleConfig: mqtt (1) { enabled 1, address 2, username 3 }
+      const mc = decode(bytes(f, 9) || new Uint8Array(0));
+      const mq = has(mc, 1) ? sub(mc, 1) : null;
+      return { kind: 'moduleConfig', mqtt: mq ? { enabled: !!u32(mq, 1), address: str(mq, 2), username: str(mq, 3) } : null };
+    }
     if (has(f, 8)) return { kind: 'rebooted' };
     if (has(f, 12)) { const x = sub(f, 12); return { kind: 'xmodem', control: u32(x, 1), seq: u32(x, 2) }; }
     if (has(f, 15)) { const x = sub(f, 15); return { kind: 'fileInfo', name: str(x, 1), size: u32(x, 2) }; }
@@ -344,6 +349,54 @@
     if (c.lora) out.push(adminSetLora(node, c.lora, region));
     return { packets: out, names: c.names };
   }
+  // The settings the admin chose for this radio (setup in takweb-server.json, flashed with the file system), compared
+  // with what the radio reports – only what differs is sent, so a radio that is set already is left alone.
+  // setup: { channel (link), gpsSecs, mqtt { address, username, password, root, tls }, gateway { ssid, psk } }
+  // radio: { channels [{ role, name }], loraRaw, region, positionRaw, mqtt { enabled, address, username }, networkRaw }
+  function setupPackets(node, setup, radio) {
+    const out = [], what = [];
+    if (!setup || !node) return { packets: out, what };
+    let chanDone = false;
+    if (setup.channel) {
+      try {
+        const c = parseChannelUrl(setup.channel);
+        const prim = (radio.channels || []).find(x => x.role === 1);
+        if (!prim || prim.name !== c.names[0] || !radio.region) {
+          out.push(...applyChannelUrl(node, setup.channel, { region: radio.region > 0 ? radio.region : REGIONS.EU_868 }).packets);
+          what.push('channel ' + c.names.filter(Boolean).join(', '));
+          chanDone = true;
+        }
+      } catch (e) { /* not a link */ }
+    }
+    const lf = decode(radio.loraRaw || new Uint8Array(0));
+    if (!chanDone && radio.loraRaw && (!u32(lf, 12) || !u32(lf, 105))) {
+      out.push(adminSetLora(node, radio.loraRaw, radio.region > 0 ? radio.region : REGIONS.EU_868));
+      what.push('always send');
+    }
+    if (setup.gpsSecs) {
+      const pf = decode(radio.positionRaw || new Uint8Array(0));
+      if (u32(pf, 1) !== setup.gpsSecs || u32(pf, 13) !== 1 || has(pf, 8) || has(pf, 9) || has(pf, 12)) {
+        out.push(adminSetPosition(node, radio.positionRaw, { secs: setup.gpsSecs }));
+        what.push('GPS');
+      }
+    }
+    if (setup.mqtt && setup.mqtt.address) {
+      const m = radio.mqtt;
+      if (!m || !m.enabled || m.address !== setup.mqtt.address || m.username !== setup.mqtt.username) {
+        out.push(adminSetMqtt(node, setup.mqtt));
+        what.push('MQTT');
+      }
+    }
+    if (setup.gateway && setup.gateway.ssid) {
+      const nf = decode(radio.networkRaw || new Uint8Array(0));
+      if (str(nf, 3) !== setup.gateway.ssid) {
+        out.push(adminSetWifi(node, radio.networkRaw, { ssid: setup.gateway.ssid, psk: setup.gateway.psk || '' }));
+        what.push('internet WLAN ' + setup.gateway.ssid);
+      }
+    }
+    return { packets: out, what };
+  }
+
   // MQTT to the server (OpenTAKServer: RabbitMQ MQTT, topic <root>/2/e/<channel>/…, encrypted with the channel key –
   // OTS decrypts it): AdminMessage.set_module_config (35) { mqtt (1) { enabled 1, address 2, username 3, password 4,
   // encryption_enabled 5, json_enabled 6, tls_enabled 7, root 8, proxy_to_client 9, map_reporting 10 } }
@@ -622,7 +675,7 @@
 
   return {
     XMODEM, crc16, sha256, toRadioXmodem, adminSetWifi, adminReboot, adminSetRegion, REGIONS, PRESETS,
-    parseChannelUrl, adminSetChannel, adminSetLora, applyChannelUrl, adminSetMqtt, adminSetPosition, withoutFields, IPHONE_IP, ipU32, staticNet,
+    parseChannelUrl, adminSetChannel, adminSetLora, applyChannelUrl, adminSetMqtt, setupPackets, adminSetPosition, withoutFields, IPHONE_IP, ipU32, staticNet,
     voicePackets, voiceRequest, parseVoice, VoiceAssembler, VOICE_CHUNK,
     PORT, BROADCAST, ALL_CHAT, TEAMS, ROLES, FOUNTAIN, Writer, decode,
     wantConfig, toRadioPacket, takPli, takChat, parseTak, parseFromRadio, parseUserPayload, parsePositionPayload,

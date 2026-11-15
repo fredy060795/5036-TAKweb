@@ -339,7 +339,7 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
     // the first start after a flash takes a while, and radios with USB in the chip (ESP32-S3: XIAO, T3S3, Heltec V3 …)
     // come back on USB as a new port – maybe twice. So: a fresh connection on each try, up to 2.5 minutes.
     let st = null, why = '';
-    const end = Date.now() + 150000;
+    const end = Date.now() + (net.quick ? 40000 : 150000);
     for (let t = 0; !st && Date.now() < end; t++) {
       try {
         if (!link) {
@@ -447,15 +447,20 @@ $('suFinish').addEventListener('click', async () => {
   });
 });
 
-// Set up in two steps when needed: radios with USB in the chip (XIAO S3, T3S3, Heltec V3 …) run Meshtastic as one USB
-// device and the boot mode as ANOTHER one (Espressif 0x303A) – after the 1200 bps reset it is a new port the browser
-// may only use once the user chose it. So: 1. flash (boot mode: choose the new port with "2b"), 2. the radio starts
-// Meshtastic again (the first port, already allowed) and gets server, TAK user, WLAN, channel and pages.
+// One button. Radios with USB in the chip (XIAO S3, T3S3, Heltec V3 …) run Meshtastic as one USB device and the boot
+// mode as ANOTHER one (Espressif 0x303A): after the 1200 bps reset the boot mode is a new port the browser may only use
+// once the user chose it – then the same button asks for it (browser rule: only on a click).
+// Everything else is in the flashed file system (pages, server, TAK user, WLAN name and the setup: channel, GPS, MQTT,
+// gateway WLAN – put onto the radio by its own page): nothing has to be done over USB after the flash.
 const ESPRESSIF = 0x303a;
+const GO_TEXT = $('suGo').textContent;
 let pendingFlash = null;
-const showStep = id => { for (const b of ['suBootGo', 'suFinish']) $(b).classList.toggle('hidden', b !== id); };
+const showStep = id => {
+  $('suGo').textContent = id === 'boot' ? '2. Choose the radio in boot mode (new USB port)' : GO_TEXT;
+  $('suFinish').classList.toggle('hidden', id !== 'suFinish');
+};
 
-// a port the browser already may use: the given one, or another allowed one that fits (vendor / not the boot port)
+// a port the browser already may use that fits
 async function allowedPort(fits, ms) {
   const end = Date.now() + ms;
   do {
@@ -468,10 +473,10 @@ async function allowedPort(fits, ms) {
   return null;
 }
 
-// the server address and the radio's TAK user – once per setup (a second try does not make another user)
+// server address, the radio's TAK user, MQTT login and the setup – once per setup (a second try makes no new user)
 async function radioLogin(job) {
   if (job.login) return job.login;
-  let server = '', invite = '', who = null;
+  let server = '', invite = '', who = null, mqtt = null;
   try { server = (await (await fetch('/api/eud/meshsite')).json()).server || ''; } catch (e) { /* without */ }
   if (job.user) { // the radio's own TAK user (new or chosen)
     const r = await api('mesh-invite', { method: 'POST', body: job.user === 'new' ? {} : { id: job.user } });
@@ -479,7 +484,13 @@ async function radioLogin(job) {
     who = r.user;
     log(`TAK user for the radio: ${who.callsign} (${who.username})\n`);
   }
-  job.login = { server, invite, who };
+  if (job.wantMqtt) {
+    if (job.mqttAddr !== mqttInfo.address) await api('mesh-mqtt', { method: 'POST', body: { address: job.mqttAddr, tls: true } });
+    const m = await api('mesh-mqtt/login', { method: 'POST', body: {} });
+    mqtt = { address: m.address, username: m.username, password: m.password, root: m.root, tls: m.tls };
+  }
+  const setup = { channel: job.chan || '', gpsSecs: job.gateway ? 900 : 120, mqtt, gateway: job.gateway };
+  job.login = { server, invite, who, mqtt, setup };
   return job.login;
 }
 
@@ -488,41 +499,54 @@ async function flashJob(job, port, baud = 460800) {
   job.flashed = port;
 }
 
-// after the flash: Meshtastic starts again (as the first USB device), then everything else over its serial API
+function doneText(job, ssid) {
+  const who = job.login && job.login.who;
+  const name = ssid || job.ap.ssid || 'TAKweb-xxxx';
+  return `Done! ${radioName(job.d)} has TAKweb${who ? ' and the TAK user ' + who.callsign : ''}. Phone: WLAN "${name}"`
+    + `${job.ap.psk ? ` (password ${job.ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once.`
+    + (job.chan || job.wantMqtt || job.gateway ? ' Opening the page sets the radio up as chosen here (channel, GPS' + (job.wantMqtt ? ', MQTT' : '') + (job.gateway ? ', internet WLAN' : '') + ') – it restarts once.' : '')
+    + (who ? ' With internet it logs in to the TAK server by itself.' : '');
+}
+
+// after the flash
 async function afterFlash(job) {
   suBar(85);
-  const { server, invite, who } = await radioLogin(job);
-  let mqtt = null;
-  if (job.wantMqtt) {
-    if (job.mqttAddr !== mqttInfo.address) await api('mesh-mqtt', { method: 'POST', body: { address: job.mqttAddr, tls: true } });
-    const m = await api('mesh-mqtt/login', { method: 'POST', body: {} });
-    mqtt = { address: m.address, username: m.username, password: m.password, root: m.root, tls: m.tls };
+  const { server, invite, who, mqtt } = await radioLogin(job);
+  const app = job.appInfo;
+  if (job.filesInImage) {
+    // all is on the radio. If its Meshtastic port is known: set it up right now as well (saves the restart later) –
+    // quietly, without asking; otherwise its page does it
+    let node = 0, ssid = '';
+    if (app) {
+      suSay('Flashed – setting up the radio …');
+      await sleep(6000);
+      const p2 = await allowedPort(i => i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId, 20000);
+      if (p2) {
+        try {
+          ({ node, ssid } = await finishRadio(p2, job.chan, server, invite, job.ap, { mqtt, gateway: job.gateway, chip: job.d.chip, info: app, filesInImage: true, quick: true }));
+        } catch (e) { log('Settings over USB not possible (' + (e.message || e) + ') – the radio\'s page does it.\n'); }
+      }
+    }
+    if (node) api('mesh-radios', { method: 'POST', body: { node: P.nodeId(node), name: radioName(job.d), ssid, role: job.gateway ? 'gateway' : 'field', mqtt: !!mqtt } }).catch(() => {});
+    if (who) loadSetupUsers();
+    suBar(100);
+    suSay(doneText(job, ssid));
+    return;
   }
+  // without an own file system: the files over USB (the old way)
   suSay('The radio starts Meshtastic … then it gets its WLAN name, the server address' + (job.chan ? ' and the mesh channel' : '') + ' (up to a few minutes).');
   await sleep(6000);
-  // the Meshtastic port: the one chosen first (if that was not the boot mode), otherwise any allowed port that is not boot mode
-  const app = job.appInfo;
   const replug = 'Flashed. Unplug the USB cable and plug it in again – the radio starts Meshtastic (about 10 s). Then press ' +
-    '"3. Finish the setup" and choose the radio in the list (the entry that came with plugging in; no new flash).';
-  if (!app && job.flashed && job.flashed.getInfo().usbVendorId === ESPRESSIF) {
-    // flashed in boot mode without knowing the Meshtastic port: after a fresh start the user chooses it
-    pendingFinish = { port: null, info: null, chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, filesInImage: job.filesInImage }, d: job.d, who };
-    showStep('suFinish');
-    throw new Error(replug);
-  }
+    '"3. Finish the setup" and choose the radio in the list (no new flash).';
   const fits = (i, p) => (app ? i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId : i.usbVendorId !== ESPRESSIF || p === job.flashed);
-  const p2 = await allowedPort(fits, 45000);
-  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app, filesInImage: job.filesInImage }, d: job.d, who };
-  if (!p2) {
-    showStep('suFinish');
-    throw new Error(replug);
-  }
+  const p2 = (app || !job.flashed || job.flashed.getInfo().usbVendorId !== ESPRESSIF) ? await allowedPort(fits, 45000) : null;
+  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app }, d: job.d, who };
+  if (!p2) { showStep('suFinish'); throw new Error(replug); }
   suBar(90);
   await finishSetup(pendingFinish);
 }
 
 async function runJob(job, port) {
-  // 1. flash – if the radio does not answer: 1200 bps reset into boot mode
   try {
     await flashJob(job, port);
   } catch (e) {
@@ -537,35 +561,49 @@ async function runJob(job, port) {
     if (again) { try { await flashJob(job, again, 115200); ok = true; } catch (x) { log('Boot mode port: ' + (x.message || x) + '\n'); } }
     if (!ok) {
       pendingFlash = job;
-      showStep('suBootGo');
-      throw new Error('The radio is in boot mode now and has a NEW USB port. Press "2b. Choose the radio in boot mode" and pick it ' +
+      showStep('boot');
+      throw new Error('The radio is in boot mode now with a NEW USB port: press the button again and choose it ' +
         '(often "USB JTAG/serial debug unit" or a new COM port). If there is none: hold BOOT while plugging in the USB cable.');
     }
   }
   pendingFlash = null;
   showStep(null);
-  // 2. Meshtastic again: server, TAK user, WLAN, channel, pages
   await afterFlash(job);
 }
 
 async function guarded(fn) {
   busy = true;
-  $('suGo').disabled = $('suBootGo').disabled = $('suFinish').disabled = true;
+  $('suGo').disabled = $('suFinish').disabled = true;
   try { await fn(); } catch (e) {
-    suSay('Not finished: ' + (e.message || e), false);
-    log('\nError: ' + (e.message || e) + '\n');
-    if (pendingFinish && !pendingFlash) showStep('suFinish'); // flashed: only the rest is missing
+    suSay((pendingFlash ? '' : 'Not finished: ') + (e.message || e), !!pendingFlash);
+    log('\n' + (pendingFlash ? '' : 'Error: ') + (e.message || e) + '\n');
+    if (pendingFinish && !pendingFlash) showStep('suFinish'); // flashed (old way): only the rest is missing
   } finally {
     busy = false;
     $('suGo').disabled = !takwebVersion();
-    $('suBootGo').disabled = $('suFinish').disabled = false;
+    $('suFinish').disabled = false;
   }
 }
 
 $('suGo').addEventListener('click', async () => {
+  if (busy) return;
+  if (pendingFlash) { // the radio is in boot mode with a new port: choose it, then flash
+    let port;
+    try { port = await navigator.serial.requestPort(); } catch (e) { return; }
+    const job = pendingFlash;
+    await guarded(async () => {
+      try { await flashJob(job, port, 115200); } catch (e) {
+        throw new Error((e.message || e) + ' – hold BOOT / USR while plugging in the USB cable, then press the button again and choose the radio.');
+      }
+      pendingFlash = null;
+      showStep(null);
+      await afterFlash(job);
+    });
+    return;
+  }
   const v = takwebVersion();
   const d = v && v.devices.find(x => x.target === $('suDev').value);
-  if (busy || !d) return;
+  if (!d) return;
   if (!('serial' in navigator)) return suSay('This browser cannot reach USB radios – use Chrome or Edge on a PC.', false);
   if ($('suRole').value === 'gateway' && !$('suGwSsid').value.trim()) return suSay('The HQ gateway needs the HQ WLAN (internet) name.', false);
   if ($('suMqtt').checked && !$('suMqtt').disabled && !$('suChan').value) return suSay('For MQTT choose the mesh channel of the OTS (its link has the uplink to the server).', false);
@@ -592,18 +630,17 @@ $('suGo').addEventListener('click', async () => {
     job.files = [{ address: 0, data: await fileOf(v.key, f.factory) }];
     if (f.ota && f.otaOff != null) job.files.push({ address: f.otaOff, data: await fileOf(v.key, f.ota) });
     if (f.littlefs && f.fsOff != null) {
-      // the radio's own file system: this server's pages, server address, TAK user and WLAN name – all in the flash,
-      // nothing to write over USB afterwards (it also replaces the old settings)
-      const { invite } = await radioLogin(job);
+      // the radio's own file system: pages, server, TAK user, WLAN name and the setup – all in the flash
+      const { invite, setup } = await radioLogin(job);
       suSay('Preparing the radio\'s file system …');
       const r = await fetch(`/api/admin/firmware/fsimage/${encodeURIComponent(v.key)}/${encodeURIComponent(f.littlefs)}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'helm' },
-        body: JSON.stringify({ map: d.chip === 'esp32s3' ? 'full' : 'small', invite, ap: job.ap }),
+        body: JSON.stringify({ map: d.chip === 'esp32s3' ? 'full' : 'small', invite, ap: job.ap, setup }),
       });
       if (r.ok) {
         job.files.push({ address: f.fsOff, data: new Uint8Array(await r.arrayBuffer()) });
         job.filesInImage = true;
-        log('File system with TAKweb, server address, TAK user and WLAN name prepared.\n');
+        log('File system with TAKweb, server address, TAK user, WLAN name and the setup prepared.\n');
       } else {
         log('Own file system not possible (' + ((await r.json().catch(() => ({}))).error || r.status) + ') – the files follow over USB.\n');
         job.files.push({ address: f.fsOff, data: await fileOf(v.key, f.littlefs) });
@@ -611,22 +648,6 @@ $('suGo').addEventListener('click', async () => {
     }
     suBar(3);
     await runJob(job, port);
-  });
-});
-
-// step 2b: the radio in boot mode is a new USB device – the user chooses it (the browser only allows that on a click)
-$('suBootGo').addEventListener('click', async () => {
-  if (busy || !pendingFlash) return;
-  let port;
-  try { port = await navigator.serial.requestPort(); } catch (e) { return; }
-  const job = pendingFlash;
-  await guarded(async () => {
-    try { await flashJob(job, port, 115200); } catch (e) {
-      throw new Error((e.message || e) + ' – hold BOOT / USR while plugging in the USB cable, then press "2b" again and choose the radio.');
-    }
-    pendingFlash = null;
-    showStep(null);
-    await afterFlash(job);
   });
 });
 
