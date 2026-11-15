@@ -320,8 +320,17 @@ async function syncPages(inst, chip) {
 async function finishRadio(port, url, server, invite, ap, net = {}) {
   let inst = null, link = null;
   const info = net.info || port.getInfo();
+  // what Meshtastic prints on USB (its log) – shown when something fails, it says why
+  const radioLog = [];
+  let partial = '';
+  const onText = t => {
+    const lines = (partial + t).split(/\r?\n/);
+    partial = lines.pop();
+    for (const l of lines) if (l.trim()) { radioLog.push(l.trim().slice(0, 200)); if (radioLog.length > 30) radioLog.shift(); }
+  };
+  const showRadioLog = () => { if (radioLog.length) log('The radio says:\n  ' + radioLog.slice(-12).join('\n  ') + '\n'); };
   const connect = async p => {
-    const l = new MI.SerialLink(p, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } });
+    const l = new MI.SerialLink(p, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } }, onText);
     inst = new MI.RadioInstaller({ P, send: b => l.send(b), log: t => log(t + '\n') });
     await l.open();
     link = l;
@@ -347,17 +356,34 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
       }
     }
     if (!st) throw Object.assign(new Error(`The radio does not answer (${why}). The firmware is on it: press "3. Finish the setup" and choose the radio's port in the list – no new flash needed.`), { finish: true });
-    // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
-    // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
-    try { await syncPages(inst, net.chip); } catch (e) { log('Pages not updated: ' + (e.message || e) + '\n'); }
+    // a file step that fails: show what the radio said, connect again (the radio may have restarted) and try once more
+    const again = async (label, fn) => {
+      for (let t = 0; ; t++) {
+        try { return await fn(); } catch (e) {
+          log(`${label}: ${e.message || e}\n`);
+          showRadioLog();
+          if (t >= 2) throw e;
+          log('Connecting to the radio again …\n');
+          if (link) { await link.close().catch(() => {}); link = null; }
+          await sleep(3000);
+          port = await radioPortAgain(port, info, 30000);
+          await connect(port);
+          st = await inst.readState(30000);
+        }
+      }
+    };
+    // first what the radio needs (server, TAK user, WLAN name) – small files – then the pages
     if (server) {
-      await inst.put('/static/takweb-server.json', new TextEncoder().encode(JSON.stringify(invite ? { server, invite } : { server })));
+      await again('Server file', () => inst.put('/static/takweb-server.json', new TextEncoder().encode(JSON.stringify(invite ? { server, invite } : { server }))));
       log(`TAKweb server on the radio: ${server}${invite ? ' (with the TAK user)' : ''}\n`);
     }
     // the radio's own WLAN: the name the admin chose, otherwise TAKweb-<last 4 of the MAC> (= of the node number)
     const ssid = ap.ssid || 'TAKweb-' + (st.node & 0xffff).toString(16).toUpperCase().padStart(4, '0');
-    await inst.put('/prefs/takweb-ap.txt', new TextEncoder().encode(`${ssid}\n${ap.psk}\n`));
+    await again('WLAN file', () => inst.put('/prefs/takweb-ap.txt', new TextEncoder().encode(`${ssid}\n${ap.psk}\n`)));
     log(`WLAN of the radio: ${ssid}${ap.psk ? '' : ' (open)'}\n`);
+    // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
+    // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
+    try { await again('Pages', () => syncPages(inst, net.chip)); } catch (e) { log('Pages not updated – the radio keeps its pages from the firmware.\n'); }
     let names = [];
     if (!url && inst.lora) { // crisis radios always send (a channel link sets it with its LoRa settings)
       await link.send(P.adminSetLora(st.node, inst.lora, inst.region));

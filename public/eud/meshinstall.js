@@ -94,14 +94,14 @@
       if (why) throw new Error(`The radio does not take ${name}: ${why}`);
       for (let i = 0, seq = 1; i < data.length; i += CHUNK, seq++) {
         const part = data.subarray(i, i + CHUNK);
-        let sent = false;
+        let sent = false, why = '';
         for (let t = 0; t < 6 && !sent; t++) {
           const c = await this.xm({ control: X.SOH, seq, buffer: part }).catch(() => 0);
           if (c === X.ACK) sent = true;
           else if (c === X.CAN) throw new Error('The radio cancelled ' + name);
-          else await sleep(200);
+          else { why = c === X.NAK ? 'refused (NAK)' : c ? 'answer ' + c : 'no answer'; await sleep(200); }
         }
-        if (!sent) throw new Error(`Packet ${seq} of ${name} not accepted`);
+        if (!sent) throw new Error(`Packet ${seq} of ${name} not accepted: ${why}`);
         onBytes(Math.min(data.length, i + CHUNK));
       }
       if (await this.xm({ control: X.EOT }) !== X.ACK) throw new Error('End of ' + name + ' not confirmed');
