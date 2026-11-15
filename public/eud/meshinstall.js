@@ -44,10 +44,10 @@
     }
 
     // the radio's state: own node, files on the flash, network settings
-    async readState() {
+    async readState(ms = 30000) {
       this.files = [];
       const nonce = 1 + Math.floor(Math.random() * 0x7ffffff0);
-      const done = this.waitFor(m => m.kind === 'configComplete' && m.id === nonce, 30000, 'Reading the radio');
+      const done = this.waitFor(m => m.kind === 'configComplete' && m.id === nonce, ms, 'Reading the radio');
       await this.send(this.P.wantConfig(nonce));
       await done;
       if (!this.myNode) throw new Error('The radio did not say who it is.');
