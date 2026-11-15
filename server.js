@@ -143,6 +143,19 @@ function resetBase() {
   return u.origin;
 }
 
+// A radio's TAKweb page (https://takweb.local, the radio's own address 192.168.4.1, or a private address in a hotspot)
+// may use the TAKweb API from the phone: certificate and TAK connection for the radio's TAK user, without leaving
+// the radio's page. Only these origins – the login data still comes from the radio, the API checks it as always.
+function radioOrigin(origin) {
+  if (!origin) return '';
+  let u;
+  try { u = new URL(origin); } catch (e) { return ''; }
+  if (!/^https?:$/.test(u.protocol)) return '';
+  const h = u.hostname;
+  const priv = /^(10\.\d+|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+$/.test(h);
+  return h === 'takweb.local' || priv ? u.origin : '';
+}
+
 // Admin only on the admin domain, if one is set
 function isAdminHost(req) {
   return !config.adminHost || hostOf(req) === config.adminHost;
@@ -1844,7 +1857,18 @@ async function handle(req, res) {
       return await handleAdminApi(req, res, p.slice(11));
     }
     if (p === '/api/app/register' && req.method === 'POST') return await handleRegister(req, res);
-    if (p.startsWith('/api/eud/')) return await handleEudApi(req, res, p.slice(9));
+    if (p.startsWith('/api/eud/')) {
+      const ro = radioOrigin(req.headers.origin);
+      if (ro) {
+        res.setHeader('Access-Control-Allow-Origin', ro);
+        res.setHeader('Vary', 'Origin');
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '600' });
+          return res.end();
+        }
+      }
+      return await handleEudApi(req, res, p.slice(9));
+    }
     if (p.startsWith('/api/access/')) return await handleAccessApi(req, res, p.slice(12));
     if (p === '/join' || p === '/access') return send(res, 302, '', 'text/plain', { Location: p + '/' });
     if (p.startsWith('/join/')) return serveStatic(res, 'join', decodeURIComponent(p.slice(6)));

@@ -84,6 +84,11 @@
     $('meshSending').textContent = state !== 'connected' ? '–' : shouldSend() ? 'Yes (LoRa)' : 'No – TAK server connected';
     $('meshPick').classList.toggle('hidden', ['connected', 'connecting', 'paused'].includes(state));
     $('meshWlan').classList.toggle('hidden', ON_RADIO || ['connected', 'connecting'].includes(state));
+    if (!navigator.bluetooth && !ON_RADIO && !$('meshWlan').dataset.opened) { // no Bluetooth (iPhone Safari): the WLAN way open
+      $('meshWlan').open = true;
+      $('meshWlan').dataset.opened = '1';
+      if (isIOS && !$('meshHttp').value) $('meshHttp').placeholder = 'https://' + P.IPHONE_IP;
+    }
     if (!$('meshHttp').value && cfg.http) $('meshHttp').value = cfg.http;
     $('meshPick').textContent = ON_RADIO ? 'CONNECT THIS RADIO' : cfg.enabled && cfg.name ? 'RECONNECT ' + cfg.name : 'CONNECT MESHTASTIC RADIO';
     $('meshOff').classList.toggle('hidden', !cfg.enabled);
@@ -798,7 +803,7 @@
     if (!window.eud.serverOnline() || seenIn(seenServer, k)) return; // another gateway was quicker
     seenServer.set(k.key, Date.now());
     const pcm = await window.Codec2.decode(m.bits, m.mode);
-    const res = await fetch('/api/eud/voicemsg', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: window.TakVoice.wav(pcm) });
+    const res = await fetch(window.eud.relayUrl('/api/eud/voicemsg'), { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: window.TakVoice.wav(pcm) });
     if (!res.ok) throw new Error('upload ' + res.status);
     const { url } = await res.json();
     const secs = Math.round(m.ms / 1000);

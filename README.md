@@ -519,6 +519,15 @@ versions), update only, the files to download (.uf2 for nRF52/RP2040).
   (https://meshtastic.org/e/#…) under "Channel from a link", or choose the OTS channel when installing from the admin.
   If the LoRa region is not set (the radio is silent), SET REGION fixes it.
 - Server button: opens the TAKweb server (the radio page itself is mesh only).
+- **Online right on the radio's page:** a radio set up with a TAK user (admin → "Set up a radio") logs in by itself:
+  phone into the radio's WLAN, open `https://takweb.local` – as soon as the phone has internet (its mobile data; the
+  radio's WLAN has none), the page fetches the certificate for the radio's TAK user and connects to the TAK server
+  through the TAKweb server, without leaving the page. Mesh and TAK server at the same time, the radio's callsign
+  (changeable). Works with any phone and any radio: the TAKweb server lets radio pages (takweb.local and private
+  addresses) use its EUD API; the login comes from the radio. All radios answer as takweb.local, so the login is kept
+  per radio and switched when the phone is in another radio's WLAN. Lost radio: block its TAK user in the admin.
+- **iPhone without Bluetooth (Safari):** on the normal TAKweb page the Meshtastic menu opens "Radio over WLAN" – put the
+  radio on the phone's hotspot (fixed address 172.20.10.14) and connect over WLAN.
 - **TAKweb online:** when the phone has internet (its mobile data), the radio page shows "TAKWEB ONLINE". It opens TAKweb
   from the server – login/QR, certificate, video, camera – and that page uses this radio over WLAN for the mesh
   (Meshtastic → Radio over WLAN, set by itself). Without internet the radio page stays: map, positions, chat over the mesh.
