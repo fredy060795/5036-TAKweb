@@ -320,8 +320,17 @@ async function syncPages(inst, chip) {
 async function finishRadio(port, url, server, invite, ap, net = {}) {
   let inst = null, link = null;
   const info = net.info || port.getInfo();
+  // what Meshtastic prints on USB (its log) – shown when something fails, it says why
+  const radioLog = [];
+  let partial = '';
+  const onText = t => {
+    const lines = (partial + t).split(/\r?\n/);
+    partial = lines.pop();
+    for (const l of lines) if (l.trim()) { radioLog.push(l.trim().slice(0, 200)); if (radioLog.length > 30) radioLog.shift(); }
+  };
+  const showRadioLog = () => { if (radioLog.length) log('The radio says:\n  ' + radioLog.slice(-12).join('\n  ') + '\n'); };
   const connect = async p => {
-    const l = new MI.SerialLink(p, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } });
+    const l = new MI.SerialLink(p, frame => { try { inst.feed(P.parseFromRadio(frame)); } catch (e) { /* not for us */ } }, onText);
     inst = new MI.RadioInstaller({ P, send: b => l.send(b), log: t => log(t + '\n') });
     await l.open();
     link = l;
@@ -347,17 +356,36 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
       }
     }
     if (!st) throw Object.assign(new Error(`The radio does not answer (${why}). The firmware is on it: press "3. Finish the setup" and choose the radio's port in the list – no new flash needed.`), { finish: true });
-    // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
-    // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
-    try { await syncPages(inst, net.chip); } catch (e) { log('Pages not updated: ' + (e.message || e) + '\n'); }
-    if (server) {
-      await inst.put('/static/takweb-server.json', new TextEncoder().encode(JSON.stringify(invite ? { server, invite } : { server })));
+    // a file step that fails: show what the radio said, connect again (the radio may have restarted) and try once more
+    const again = async (label, fn) => {
+      for (let t = 0; ; t++) {
+        try { return await fn(); } catch (e) {
+          log(`${label}: ${e.message || e}\n`);
+          showRadioLog();
+          if (t >= 2) throw e;
+          log('Connecting to the radio again …\n');
+          if (link) { await link.close().catch(() => {}); link = null; }
+          await sleep(3000);
+          port = await radioPortAgain(port, info, 30000);
+          await connect(port);
+          st = await inst.readState(30000);
+        }
+      }
+    };
+    // first what the radio needs (server, TAK user, WLAN name) – small files – then the pages; all of it is in the
+    // flashed file system already when it was made for this radio
+    if (net.filesInImage) log('Pages, server address, TAK user and WLAN name came with the flash.\n');
+    if (server && !net.filesInImage) {
+      await again('Server file', () => inst.put('/static/takweb-server.json', new TextEncoder().encode(JSON.stringify(invite ? { server, invite } : { server }))));
       log(`TAKweb server on the radio: ${server}${invite ? ' (with the TAK user)' : ''}\n`);
     }
     // the radio's own WLAN: the name the admin chose, otherwise TAKweb-<last 4 of the MAC> (= of the node number)
     const ssid = ap.ssid || 'TAKweb-' + (st.node & 0xffff).toString(16).toUpperCase().padStart(4, '0');
-    await inst.put('/prefs/takweb-ap.txt', new TextEncoder().encode(`${ssid}\n${ap.psk}\n`));
+    if (!net.filesInImage) await again('WLAN file', () => inst.put('/prefs/takweb-ap.txt', new TextEncoder().encode(`${ssid}\n${ap.psk}\n`)));
     log(`WLAN of the radio: ${ssid}${ap.psk ? '' : ' (open)'}\n`);
+    // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
+    // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
+    if (!net.filesInImage) try { await again('Pages', () => syncPages(inst, net.chip)); } catch (e) { log('Pages not updated – the radio keeps its pages from the firmware.\n'); }
     let names = [];
     if (!url && inst.lora) { // crisis radios always send (a channel link sets it with its LoRa settings)
       await link.send(P.adminSetLora(st.node, inst.lora, inst.region));
@@ -440,14 +468,9 @@ async function allowedPort(fits, ms) {
   return null;
 }
 
-async function flashJob(job, port, baud = 460800) {
-  await espFlash({ port, files: job.files, eraseAll: false, baud, chip: job.d.chip, progress: p => suBar(3 + p * 0.8), say: t => suSay(t) });
-  job.flashed = port;
-}
-
-// after the flash: Meshtastic starts again (as the first USB device), then everything else over its serial API
-async function afterFlash(job) {
-  suBar(85);
+// the server address and the radio's TAK user – once per setup (a second try does not make another user)
+async function radioLogin(job) {
+  if (job.login) return job.login;
   let server = '', invite = '', who = null;
   try { server = (await (await fetch('/api/eud/meshsite')).json()).server || ''; } catch (e) { /* without */ }
   if (job.user) { // the radio's own TAK user (new or chosen)
@@ -456,6 +479,19 @@ async function afterFlash(job) {
     who = r.user;
     log(`TAK user for the radio: ${who.callsign} (${who.username})\n`);
   }
+  job.login = { server, invite, who };
+  return job.login;
+}
+
+async function flashJob(job, port, baud = 460800) {
+  await espFlash({ port, files: job.files, eraseAll: false, baud, chip: job.d.chip, progress: p => suBar(3 + p * 0.8), say: t => suSay(t) });
+  job.flashed = port;
+}
+
+// after the flash: Meshtastic starts again (as the first USB device), then everything else over its serial API
+async function afterFlash(job) {
+  suBar(85);
+  const { server, invite, who } = await radioLogin(job);
   let mqtt = null;
   if (job.wantMqtt) {
     if (job.mqttAddr !== mqttInfo.address) await api('mesh-mqtt', { method: 'POST', body: { address: job.mqttAddr, tls: true } });
@@ -470,13 +506,13 @@ async function afterFlash(job) {
     '"3. Finish the setup" and choose the radio in the list (the entry that came with plugging in; no new flash).';
   if (!app && job.flashed && job.flashed.getInfo().usbVendorId === ESPRESSIF) {
     // flashed in boot mode without knowing the Meshtastic port: after a fresh start the user chooses it
-    pendingFinish = { port: null, info: null, chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip }, d: job.d, who };
+    pendingFinish = { port: null, info: null, chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, filesInImage: job.filesInImage }, d: job.d, who };
     showStep('suFinish');
     throw new Error(replug);
   }
   const fits = (i, p) => (app ? i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId : i.usbVendorId !== ESPRESSIF || p === job.flashed);
   const p2 = await allowedPort(fits, 45000);
-  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app }, d: job.d, who };
+  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app, filesInImage: job.filesInImage }, d: job.d, who };
   if (!p2) {
     showStep('suFinish');
     throw new Error(replug);
@@ -555,7 +591,24 @@ $('suGo').addEventListener('click', async () => {
     const f = d.flash;
     job.files = [{ address: 0, data: await fileOf(v.key, f.factory) }];
     if (f.ota && f.otaOff != null) job.files.push({ address: f.otaOff, data: await fileOf(v.key, f.ota) });
-    if (f.littlefs && f.fsOff != null) job.files.push({ address: f.fsOff, data: await fileOf(v.key, f.littlefs) }); // TAKweb, replaces old settings
+    if (f.littlefs && f.fsOff != null) {
+      // the radio's own file system: this server's pages, server address, TAK user and WLAN name – all in the flash,
+      // nothing to write over USB afterwards (it also replaces the old settings)
+      const { invite } = await radioLogin(job);
+      suSay('Preparing the radio\'s file system …');
+      const r = await fetch(`/api/admin/firmware/fsimage/${encodeURIComponent(v.key)}/${encodeURIComponent(f.littlefs)}`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'helm' },
+        body: JSON.stringify({ map: d.chip === 'esp32s3' ? 'full' : 'small', invite, ap: job.ap }),
+      });
+      if (r.ok) {
+        job.files.push({ address: f.fsOff, data: new Uint8Array(await r.arrayBuffer()) });
+        job.filesInImage = true;
+        log('File system with TAKweb, server address, TAK user and WLAN name prepared.\n');
+      } else {
+        log('Own file system not possible (' + ((await r.json().catch(() => ({}))).error || r.status) + ') – the files follow over USB.\n');
+        job.files.push({ address: f.fsOff, data: await fileOf(v.key, f.littlefs) });
+      }
+    }
     suBar(3);
     await runJob(job, port);
   });
