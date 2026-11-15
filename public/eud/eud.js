@@ -89,8 +89,17 @@ const PUBLIC_TILES = {
 if (MESH_ONLY) document.body.classList.add('mesh-only');
 // on the radio: a link to the TAKweb server that tells it about this radio – TAKweb online then talks to the mesh
 // through this radio over WLAN (Meshtastic → "Radio over WLAN"), login/QR/video come from the server
+// a server address without a path (only the domain) means TAKweb at /eud/ – the domain itself is the admin
+function eudUrl(u) {
+  if (!u) return u;
+  try {
+    const x = new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u);
+    if (x.pathname === '/' || x.pathname === '') x.pathname = '/eud/';
+    return x.href;
+  } catch (e) { return u; }
+}
 function radioLink(u) {
-  const x = new URL(u, location.href);
+  const x = new URL(eudUrl(u), location.href);
   const h = new URLSearchParams(x.hash.slice(1));
   h.set('radio', location.origin);
   x.hash = h.toString();
@@ -2781,7 +2790,7 @@ if (MESH_ONLY) {
     if (webUrl) return webUrl;
     const j = await radioFile();
     invite = j.invite || '';
-    return (webUrl = j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || '');
+    return (webUrl = eudUrl(j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || ''));
   };
   const goOnline = async () => { const u = await serverUrl(); if (u) location.href = radioLink(invite || u); };
   // server button: the known server with one tap, typing only when there is none (or for another server)
@@ -2801,7 +2810,7 @@ if (MESH_ONLY) {
   $('srvWebGo').addEventListener('click', () => {
     let u = $('srvWeb').value.trim();
     if (!u) return $('srvWeb').focus();
-    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    u = eudUrl(u);
     store.set('eud.webUrl', u);
     location.href = radioLink(u);
   });

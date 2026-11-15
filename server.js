@@ -1815,8 +1815,12 @@ async function handle(req, res) {
       return send(res, 302, '', 'text/plain', { Location: config.apkUrl });
     }
     if (p === '/') {
-      if (admin) return send(res, 302, '', 'text/plain', { Location: '/admin/' });
-      return send(res, 200, 'TAKweb');
+      // links from a radio's page or an invitation carry their data after # (never sent to the server): those go to
+      // TAKweb (/eud/), everything else to the admin – a link that lost its /eud/ still opens TAKweb, not the admin login
+      const html = to => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>TAKweb</title>`
+        + `<script>location.replace((/(^#|&)(radio|host|enroll|t)=/.test(location.hash) ? '/eud/' : '${to}') + location.hash)</script>`
+        + `<noscript><a href="${to}">TAKweb</a></noscript>`;
+      return send(res, 200, html(admin ? '/admin/' : '/eud/'), 'text/html; charset=utf-8', { 'Cache-Control': 'no-store' });
     }
     if (p === '/admin') return send(res, 302, '', 'text/plain', { Location: '/admin/' });
     if (p.startsWith('/admin/')) {
