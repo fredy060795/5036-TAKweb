@@ -35,10 +35,15 @@ class FakeRadio {
       const g = n => (x.has(n) ? x.get(n)[0].v : 0);
       const control = g(1), seq = g(2), crc = g(3), buf = x.has(4) ? Buffer.from(x.get(4)[0].v) : Buffer.alloc(0);
       if ((control === X.SOH) && seq === 0 && !this.rx) {
-        const name = buf.toString();
+        // like the firmware: memcpy into a 128-byte buffer without an end mark, then used as a C string
+        this.fname = this.fname || Buffer.alloc(128);
+        buf.copy(this.fname);
+        const z = this.fname.indexOf(0);
+        const name = this.fname.subarray(0, z < 0 ? 128 : z).toString();
         this.fs.delete(name); this.fs.set(name, Buffer.alloc(0)); this.rx = { name, packetno: 1 };
         return this.ack(X.ACK);
       }
+      if (control === X.SOH && seq === 0 && this.rx) return this.ack(X.NAK); // still receiving: refuses a new file (firmware)
       if (control === X.SOH && this.rx) {
         if (seq !== this.rx.packetno || P.crc16(buf) !== crc) return this.ack(X.NAK);
         const room = Math.max(0, this.capacity - this.used());
@@ -236,4 +241,16 @@ test('installer: pages from an old firmware build are brought to the server vers
   assert.ok(!radio.fs.has('/static/gone.js.gz'), 'old file removed');
   assert.ok(radio.fs.has('/prefs/config.proto'), 'settings stay');
   assert.equal(await inst.syncPages(want, async () => { throw new Error('nothing to load'); }), 0, 'second time: current');
+});
+
+test('installer: file names with an end mark (no rest of a longer name) and a hanging transfer is ended first', async () => {
+  const radio = new FakeRadio();
+  const inst = connect(radio);
+  await inst.readState();
+  await inst.put('/static/a-very-long-file-name.js.gz', Buffer.from('long'));
+  await inst.put('/static/b.gz', Buffer.from('short'));
+  assert.deepEqual([...radio.fs.keys()].filter(n => n.startsWith('/static/')).sort(), ['/static/a-very-long-file-name.js.gz', '/static/b.gz']);
+  radio.rx = { name: '/static/broken.gz', packetno: 7 }; // a transfer that broke off (USB port changed)
+  await inst.put('/static/takweb-server.json', Buffer.from('{"server":"x"}'));
+  assert.equal(radio.fs.get('/static/takweb-server.json').toString(), '{"server":"x"}');
 });

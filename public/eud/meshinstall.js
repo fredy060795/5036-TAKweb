@@ -61,17 +61,37 @@
       return (await answer).control;
     }
 
+    // the firmware copies the file name without an end mark into its buffer: send it with one (a shorter name after a
+    // longer one would keep the rest of the old one)
+    fileName(name) { return new TextEncoder().encode(name + '\0'); }
+
+    // open a file on the flash for writing. A transfer that broke off (e.g. the USB port changed while the radio started)
+    // leaves the firmware "receiving" – then it refuses every new file: end that one (EOT closes it, nothing is deleted)
+    // and try again. -> '' or the reason
+    async open(name) {
+      const X = this.P.XMODEM;
+      let why = '';
+      for (let t = 0; t < 4; t++) {
+        const c = await this.xm({ control: X.SOH, seq: 0, buffer: this.fileName(name) }).catch(() => 0);
+        if (c === X.ACK) return '';
+        why = c === X.NAK ? 'the radio refused it (NAK)' : c ? 'answer ' + c : 'no answer';
+        if (c === X.NAK) await this.xm({ control: X.EOT }).catch(() => 0); // end a hanging transfer
+        await sleep(300);
+      }
+      return why;
+    }
+
     async remove(name) {
       const X = this.P.XMODEM;
-      if (await this.xm({ control: X.SOH, seq: 0, buffer: new TextEncoder().encode(name) }) !== X.ACK) throw new Error('Cannot open ' + name);
+      const why = await this.open(name);
+      if (why) throw new Error(`Cannot open ${name}: ${why}`);
       await this.xm({ control: X.CAN });
     }
 
     async put(name, data, onBytes = () => {}) {
       const X = this.P.XMODEM;
-      let ok = false;
-      for (let t = 0; t < 3 && !ok; t++) ok = await this.xm({ control: X.SOH, seq: 0, buffer: new TextEncoder().encode(name) }).catch(() => 0) === X.ACK;
-      if (!ok) throw new Error('The radio does not take ' + name);
+      const why = await this.open(name);
+      if (why) throw new Error(`The radio does not take ${name}: ${why}`);
       for (let i = 0, seq = 1; i < data.length; i += CHUNK, seq++) {
         const part = data.subarray(i, i + CHUNK);
         let sent = false;
