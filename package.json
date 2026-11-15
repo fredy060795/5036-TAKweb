@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@wasm-os/mklfs": "0.1.0",
     "esptool-js": "0.6.1",
     "hls.js": "1.7.3",
     "jsqr": "1.4.0",

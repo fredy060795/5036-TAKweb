@@ -519,6 +519,10 @@ versions), update only, the files to download (.uf2 for nRF52/RP2040).
   (https://meshtastic.org/e/#…) under "Channel from a link", or choose the OTS channel when installing from the admin.
   If the LoRa region is not set (the radio is silent), SET REGION fixes it.
 - Server button: opens the TAKweb server (the radio page itself is mesh only).
+- **Everything in one flash:** "Set up a radio" builds the radio's own file system on the server (LittleFS, with
+  `@wasm-os/mklfs`): this server's TAKweb pages, the server address, the radio's TAK user and its WLAN name – flashed
+  together with the firmware, nothing is written over USB afterwards (only the Meshtastic settings: channel, region,
+  GPS, MQTT). After an update of TAKweb run `npm install` once (new package).
 - **Online right on the radio's page:** a radio set up with a TAK user (admin → "Set up a radio") logs in by itself:
   phone into the radio's WLAN, open `https://takweb.local` – as soon as the phone has internet (its mobile data; the
   radio's WLAN has none), the page fetches the certificate for the radio's TAK user and connects to the TAK server

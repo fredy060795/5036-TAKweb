@@ -1492,6 +1492,24 @@ async function handleAdminApi(req, res, route) {
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': fs.statSync(file).size, 'Content-Disposition': `attachment; filename="${fwf[2]}"`, 'Cache-Control': 'no-store' });
     return fs.createReadStream(file).pipe(res);
   }
+  // the file system for one radio, flashed with the firmware: this server's pages + server address, the radio's TAK
+  // user and WLAN name (lib/meshsite.js radioImage) – nothing has to be written over USB afterwards
+  const fsi = /^firmware\/fsimage\/([\w.-]+)\/([\w.-]+)$/.exec(route);
+  if (fsi && method === 'POST') {
+    const file = firmwareLib.file(fsi[1], fsi[2]);
+    if (!file) return json(res, 404, { error: 'Not found' });
+    const body = await readJson(req);
+    const server = publicBase(req) + '/eud/';
+    try {
+      const img = await meshsite.radioImage(fs.readFileSync(file), {
+        site: meshsite.build(VERSION, server, body.map === 'full' ? 'full' : 'small'), server,
+        invite: typeof body.invite === 'string' ? body.invite.slice(0, 2000) : '',
+        ap: body.ap ? { ssid: String(body.ap.ssid || '').slice(0, 32), psk: String(body.ap.psk || '').slice(0, 63) } : null,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': img.length, 'Cache-Control': 'no-store' });
+      return res.end(img);
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
   const fwd = /^firmware\/([\w.-]+)$/.exec(route);
   if (fwd && method === 'DELETE') return json(res, 200, { removed: firmwareLib.remove(fwd[1]), versions: firmwareLib.list() });
   // clear the map on all TAKweb devices (after a mission): every device asks its user on the next connection

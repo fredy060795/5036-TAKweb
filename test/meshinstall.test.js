@@ -254,3 +254,25 @@ test('installer: file names with an end mark (no rest of a longer name) and a ha
   await inst.put('/static/takweb-server.json', Buffer.from('{"server":"x"}'));
   assert.equal(radio.fs.get('/static/takweb-server.json').toString(), '{"server":"x"}');
 });
+
+test('meshsite: file system image for one radio – current pages, server + TAK user, WLAN name, other files kept', async () => {
+  const { buildLittlefsImage, openLittlefsImage } = require('@wasm-os/mklfs');
+  const g = { blockSize: 4096, readSize: 128, progSize: 128 };
+  // like the firmware build's image: old pages and something else
+  const base = Buffer.from(await buildLittlefsImage([
+    { name: 'static/index.html.gz', data: Buffer.from('old') }, { name: 'static/gone.js.gz', data: Buffer.from('x') },
+    { name: 'prefs/other.txt', data: Buffer.from('keep') }, { name: 'prefs/takweb-ap.txt', data: Buffer.from('OLD\n\n') },
+  ], 1024 * 1024, g));
+  const site = meshsite.build('9.9.9', 'https://tak.example.org/eud/');
+  const img = await meshsite.radioImage(base, { site, server: 'https://tak.example.org/eud/', invite: 'https://tak.example.org/eud/#host=x&username=r1', ap: { ssid: 'TAKweb-Alpha', psk: '12345678' } });
+  assert.equal(img.length, base.length, 'same size as the partition');
+  const fsys = await openLittlefsImage(new Uint8Array(img), g);
+  const names = fsys.list().filter(e => e.type === 'file').map(e => e.path.replace(/^\/+/, '')).sort();
+  for (const f of site.files) assert.ok(names.includes('static/' + f.name + '.gz'), f.name);
+  assert.ok(!names.includes('static/gone.js.gz'), 'old pages replaced');
+  assert.deepEqual(Buffer.from(fsys.readFile('static/index.html.gz')), site.files.find(f => f.name === 'index.html').gz);
+  assert.deepEqual(JSON.parse(Buffer.from(fsys.readFile('static/takweb-server.json')).toString()), { server: 'https://tak.example.org/eud/', invite: 'https://tak.example.org/eud/#host=x&username=r1' });
+  assert.equal(Buffer.from(fsys.readFile('prefs/takweb-ap.txt')).toString(), 'TAKweb-Alpha\n12345678\n');
+  assert.equal(Buffer.from(fsys.readFile('prefs/other.txt')).toString(), 'keep');
+  await assert.rejects(meshsite.radioImage(Buffer.from(await buildLittlefsImage([], 64 * 1024, g)), { site }), /does not fit/);
+});
