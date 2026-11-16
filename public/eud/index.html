@@ -88,7 +88,6 @@
 <div id="placeHint" class="hidden">Tap the map to place the marker</div>
 <div id="moveHint" class="hidden">Move <b id="moveName"></b>: drag it or tap the new position <button type="button" id="moveCancel" aria-label="Cancel">✕</button></div>
 <!-- on the radio with internet: TAKweb from the server (login, QR, video) – it stays connected to this radio -->
-<div id="onlineBar" class="hidden"><span id="onlineText">Internet available: log in to the TAK server, scan your QR code, video – open TAKweb online. The mesh stays connected.</span><button type="button" id="onlineGo">TAKWEB ONLINE</button><button type="button" id="onlineClose" aria-label="Close">✕</button></div>
 <div id="permBar" class="hidden"><span id="permText"></span><button type="button" id="permGo">ALLOW</button><button type="button" id="permClose" aria-label="Close">✕</button></div>
 <div id="houndHint" class="hidden">Bloodhound: tap the target – a marker, a user or a point on the map <button type="button" id="houndPickCancel" aria-label="Cancel">✕</button></div>
 
@@ -258,18 +257,18 @@
       <section data-sec="server">
         <!-- on the radio (mesh only): the TAK server is reached through the TAKweb server – the phone keeps its internet -->
         <div id="srvMesh">
-          <p class="hint">A radio set up with a TAK user connects to the TAK server by itself as soon as the phone has internet
-            (mobile data) – right here, the mesh stays connected. Video and camera: open TAKweb online.</p>
-          <!-- the server this radio was set up from (admin) – one tap -->
+          <p class="hint">As soon as the phone has internet (mobile data), this page uses the TAKweb server below for everything
+            TAKweb online has – TAK servers, video, data packages, Data Sync – right here, the mesh stays connected. A radio set
+            up with a TAK user logs in by itself.</p>
+          <!-- the server this radio was set up from (admin) -->
           <div id="srvKnown" class="hidden">
             <div class="kv"><span>TAKweb server</span><b id="srvName"></b></div>
-            <button type="button" class="mbtn pri big" id="srvKnownGo">OPEN TAKWEB ONLINE</button>
             <button type="button" class="mbtn" id="srvChange">OTHER TAKWEB SERVER …</button>
           </div>
           <div id="srvManual">
             <label for="srvWeb">TAKweb server</label>
             <input id="srvWeb" class="in" placeholder="https://your-server/eud/" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url">
-            <button type="button" class="mbtn pri" id="srvWebGo">OPEN TAKWEB SERVER</button>
+            <button type="button" class="mbtn pri" id="srvWebGo">USE THIS TAKWEB SERVER</button>
           </div>
         </div>
         <div id="srvList"></div>

@@ -847,7 +847,9 @@
   // ---------------- Video: release the radio while streaming, reconnect afterwards ----------------
 
   document.addEventListener('eud-video', e => {
-    if (!cfg.enabled) return;
+    // only a Bluetooth radio shares the phone's Bluetooth with the helmet camera – over WLAN (the radio's page) or USB
+    // the mesh keeps running while a stream runs
+    if (!cfg.enabled || (cfg.transport && cfg.transport !== 'ble')) return;
     if (e.detail.on) {
       if (pausedForVideo) return;
       pausedForVideo = true;
