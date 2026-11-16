@@ -1026,18 +1026,43 @@ async function handleTracks(req, res, route, method) {
 
 // ---------------- HQ pages ----------------
 // video sources for the video wall: feeds of the TAK server (MediaMTX), TAKweb camera streams, videos in CoT (drones …)
+// video list of the TAK server for the EUD: our cameras with name + start time, ended ones (still listed by
+// an older server or the "all" mode) left out, newest first
+function ownFeeds(feeds) {
+  const byPath = new Map();
+  for (const [id, r] of Object.entries(takVideo.s.paths)) if (r.pushed) byPath.set(r.pushed, id);
+  const out = [];
+  for (const f of feeds) {
+    let path = '';
+    try { path = decodeURIComponent(new URL(f.url).pathname).replace(/^\/+|\/+$/g, '').replace(/^hls\/|\/index\.m3u8$/g, ''); } catch (e) { /* no URL */ }
+    const id = byPath.get(path);
+    if (!id) { out.push(f); continue; }
+    const start = hub.startedAt(id);
+    if (!start) continue; // camera not sending: ended
+    const e = store.data.streams[id] || {};
+    out.push({ ...f, alias: e.label || e.user || f.alias, startedAt: new Date(start).toISOString() });
+  }
+  return out.sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+}
+
 async function hqFeeds(req) {
   const out = [];
   if (takUsers.otsConfigured()) {
     try {
       const base = new URL(takUsers.t.ots.url);
-      for (const f of await takUsers.ots().videoStreams()) out.push({ name: f.path, kind: 'TAK server', url: new URL('/hls/' + f.path + '/index.m3u8', base).href });
+      // our own cameras come below directly (with start time) – not twice
+      const own = new Set(Object.values(takVideo.s.paths).map(r => r.pushed).filter(Boolean));
+      for (const f of await takUsers.ots().videoStreams()) if (!own.has(f.path)) out.push({ name: f.path, kind: 'TAK server', url: new URL('/hls/' + f.path + '/index.m3u8', base).href });
     } catch (e) { /* OTS not reachable */ }
   }
+  // TAKweb cameras: only while sending, newest first, with the start of the broadcast
+  const cams = [];
   for (const e of Object.values(store.data.streams || {})) {
-    if (!hub.live(StreamHub.id(e.user, e.streamId))) continue;
-    out.push({ name: e.label || `${e.user}/${e.streamId}`, kind: 'Camera', url: links(req, e).stream, mjpeg: true });
+    const start = hub.startedAt(StreamHub.id(e.user, e.streamId));
+    if (!start) continue;
+    cams.push({ name: e.label || `${e.user}/${e.streamId}`, kind: 'Camera', url: links(req, e).stream, mjpeg: true, startedAt: new Date(start).toISOString() });
   }
+  out.unshift(...cams.sort((a, b) => b.startedAt.localeCompare(a.startedAt)));
   const seen = new Set(out.map(x => x.url));
   const st = hq.state(Infinity);
   for (const x of [...st.devices, ...st.objects]) if (x.video && !seen.has(x.video)) { seen.add(x.video); out.push({ name: x.callsign || x.uid, kind: /UAS|drone/i.test(x.uid + x.callsign) || /^a-.-A/.test(x.type) ? 'Drone' : 'Video', url: x.video }); }
@@ -1250,6 +1275,7 @@ async function handleEudApi(req, res, route) {
     if (why) return json(res, 403, { error: why });
     try {
       const r = await tak.marti({ ...conn, host, altHost: (ownTak(host) || {}).altHost || '' }, String(body.action || ''), body.args || {});
+      if (body.action === 'videos' && r && Array.isArray(r.feeds)) r.feeds = ownFeeds(r.feeds);
       return json(res, 200, await raster.prepare(r, { ffmpeg: config.ffmpeg, log })); // large map images in packages
     } catch (e) {
       log('EUD TAK-API', host, String(body.action || ''), 'error:', e.message);

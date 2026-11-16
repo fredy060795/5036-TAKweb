@@ -22,6 +22,8 @@ before(async () => {
   hub = new StreamHub({ store, ffmpeg: false, workDir: dir });
   tu = new TakUsers(store);
   tv = new TakVideo({ store, hub, takUsers: tu, base: () => BASE });
+  assert.equal(tv.s.when, 'live'); // default: ended streams leave the TAK server's list
+  tv.setSettings({ when: 'all' });
 });
 
 after(() => {
@@ -106,6 +108,46 @@ test('an existing path (e.g. after a restart) is adopted', async () => {
   await tv.touch(id);
   assert.equal(mock.state.videos['cam/bravo'].source, tv.sourceFor(id));
   assert.equal(tv.view(id).inTak, true);
+});
+
+test('live: feed named with the start time, removed when the broadcast ended, new name for the next one', async () => {
+  tv.setSettings({ when: 'live', auto: true });
+  const e = hub.register('Helm Charlie', '');
+  const id = StreamHub.id(e.user, e.streamId);
+  const ws = {};
+  hub.attachPublisher(id, ws);
+  const t0 = hub.startedAt(id);
+  assert.ok(t0 > 0);
+  await tv.touch(id);
+  const p1 = tv.view(id).path;
+  assert.match(p1, /^cam\/helm-charlie-\d\d\.\d\d$/);
+  assert.ok(mock.state.videos[p1]);
+  // short dropout: the same broadcast (start time and path stay)
+  hub.detachPublisher(id, ws);
+  assert.equal(hub.startedAt(id), 0);
+  hub.attachPublisher(id, ws);
+  assert.equal(hub.startedAt(id), t0);
+  hub.detachPublisher(id, ws);
+  // ended for longer than the grace time: removed from the TAK server
+  tv.lastSeen.set(id, Date.now() - 300000);
+  await tv.touch(id);
+  assert.equal(mock.state.videos[p1], undefined);
+  // next broadcast later: new start time
+  hub.live(id).endedAt = Date.now() - 3 * 3600 * 1000;
+  hub.live(id).startedAt = Date.now() - 4 * 3600 * 1000;
+  hub.attachPublisher(id, ws);
+  assert.ok(hub.startedAt(id) > t0 - 1);
+  await tv.touch(id);
+  assert.equal(tv.view(id).inTak, true);
+  // a path set by the admin is kept
+  await tv.set(id, { path: 'alpha/helm' });
+  hub.detachPublisher(id, ws);
+  tv.lastSeen.set(id, 0);
+  await tv.touch(id);
+  hub.attachPublisher(id, {});
+  await tv.touch(id);
+  assert.equal(tv.view(id).path, 'alpha/helm');
+  assert.ok(mock.state.videos['alpha/helm']);
 });
 
 test('admin notifications can be deleted, the counter keeps running', () => {

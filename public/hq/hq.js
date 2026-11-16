@@ -500,7 +500,7 @@ function layoutWall() {
   }
   tiles.forEach((t, i) => {
     const v = t.sel.value || saved[i] || '';
-    t.sel.replaceChildren(el('option', { value: '', text: '– source –' }), ...feeds.map(f => el('option', { value: f.url, text: `${f.kind}: ${f.name}` })));
+    t.sel.replaceChildren(el('option', { value: '', text: '– source –' }), ...feeds.map(f => el('option', { value: f.url, text: `${f.kind}: ${f.name}${f.startedAt ? ' · since ' + new Date(f.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}` })));
     t.sel.value = feeds.some(f => f.url === v) ? v : '';
     if ((t.playing || '') !== t.sel.value) playTile(t);
   });
