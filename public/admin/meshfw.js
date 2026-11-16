@@ -110,6 +110,64 @@ async function bootMode(say) {
 }
 $('fwBoot').addEventListener('click', () => bootMode((t, ok) => setMsg($('fwMsg'), t, ok)));
 
+// Radio log: the text the firmware writes over USB (start log, web server, WLAN, free memory …) – to find out why
+// e.g. the TAKweb page does not come. The radio's USB port goes away on a reset (ESP32-S3) and comes back: we
+// reconnect by ourselves as long as the log is on.
+let monitor = null;
+async function monitorRun(first) {
+  const m = { on: true, port: first, reader: null };
+  monitor = m;
+  const info = first.getInfo ? first.getInfo() : {};
+  $('fwMon').textContent = '■ Stop radio log';
+  logTo = 'fwLog';
+  log('— Radio log: press RST on the radio now to see the start (WLAN, "Web Servers Ready", free memory). —\n');
+  const dec = new TextDecoder();
+  while (m.on) {
+    try {
+      await m.port.open({ baudRate: 115200 });
+      try { await m.port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) { /* not supported */ }
+      m.reader = m.port.readable.getReader();
+      for (;;) {
+        const { value, done } = await m.reader.read();
+        if (done || !m.on) break;
+        log(dec.decode(value, { stream: true }).replace(/\x1b\[[0-9;]*m/g, '').replace(/\r/g, ''));
+      }
+    } catch (e) { if (m.on) log('\n— (USB gone: ' + (e.message || e) + ' – waiting for the radio …) —\n'); }
+    try { if (m.reader) { await m.reader.cancel().catch(() => {}); m.reader.releaseLock(); } } catch (e) { /* closed */ }
+    m.reader = null;
+    try { await m.port.close(); } catch (e) { /* closed */ }
+    if (!m.on) break;
+    // the same radio again (after a reset it can come back as a new port)
+    let next = null;
+    for (let i = 0; i < 60 && m.on && !next; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const ports = await navigator.serial.getPorts();
+      next = ports.find(p => { const x = p.getInfo ? p.getInfo() : {}; return x.usbVendorId === info.usbVendorId && x.usbProductId === info.usbProductId; }) || null;
+    }
+    if (!next) { log('\n— Radio not back – log stopped. —\n'); break; }
+    m.port = next;
+  }
+  if (monitor === m) monitor = null;
+  $('fwMon').textContent = '📜 Radio log (USB)';
+}
+// flashing needs the port: the log stops first
+async function stopMonitor() {
+  const m = monitor;
+  if (!m) return;
+  m.on = false;
+  try { if (m.reader) await m.reader.cancel(); } catch (e) { /* closed */ }
+  for (let i = 0; i < 20 && monitor === m; i++) await new Promise(r => setTimeout(r, 100));
+}
+$('fwMon').addEventListener('click', async () => {
+  if (monitor) return stopMonitor();
+  if (busy) return;
+  if (!('serial' in navigator)) return setMsg($('fwMsg'), 'This browser cannot reach USB radios – use Chrome or Edge on a PC.');
+  let port;
+  try { port = await navigator.serial.requestPort(); } catch (e) { return; } // list closed
+  $('fwLog').textContent = '';
+  monitorRun(port);
+});
+
 async function fileOf(key, name) {
   const r = await fetch(`/api/admin/firmware/file/${encodeURIComponent(key)}/${encodeURIComponent(name)}`, { credentials: 'same-origin' });
   if (!r.ok) throw new Error(name + ': ' + r.status);
@@ -117,6 +175,7 @@ async function fileOf(key, name) {
 }
 
 $('fwGo').addEventListener('click', async () => {
+  await stopMonitor();
   const v = curVersion(), d = curDevice();
   if (busy || !d || !d.esp) return;
   if (!('serial' in navigator)) return setMsg($('fwMsg'), 'This browser cannot reach USB devices – use Chrome or Edge on a PC.');
@@ -431,6 +490,7 @@ async function finishSetup(f) {
   suSay(`Done! ${radioName(f.d)} has TAKweb${names.length ? ', the mesh channel ' + names.join(', ') : ''}${f.who ? ' and the TAK user ' + f.who.callsign : ''}. On the phone: WLAN "${ssid}"${f.ap.psk ? ` (password ${f.ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once${f.who ? '; with internet it logs in to the TAK server by itself' : ''}.`);
 }
 $('suFinish').addEventListener('click', async () => {
+  await stopMonitor();
   if (busy || !pendingFinish) return;
   // after the flash the radio is often a new USB device (the old port is gone): always let the user choose it – on
   // the click itself (browser rule)
@@ -586,6 +646,7 @@ async function guarded(fn) {
 }
 
 $('suGo').addEventListener('click', async () => {
+  await stopMonitor();
   if (busy) return;
   if (pendingFlash) { // the radio is in boot mode with a new port: choose it, then flash
     let port;
