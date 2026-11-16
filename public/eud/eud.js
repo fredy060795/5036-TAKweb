@@ -1408,7 +1408,7 @@ function drawMe() {
   if (!meMarker) {
     meCircle = L.circle(ll, { radius: me.acc || 0, color: '#007bff', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(map);
     meMarker = L.marker(ll, { icon, zIndexOffset: 1000 }).addTo(map).bindPopup(() =>
-      `<div class="t">${esc(profile.callsign || 'Me')}</div><div>${me.lat.toFixed(5)}, ${me.lon.toFixed(5)}</div><div class="k">± ${Math.round(me.acc)} m</div>`);
+      `<div class="t">${esc(profile.callsign || 'Me')}</div><div>${me.lat.toFixed(5)}, ${me.lon.toFixed(5)}</div><div class="k">${me.manual ? 'set by hand (no GPS fix)' : '± ' + Math.round(me.acc) + ' m'}</div>`);
     map.setView(ll, Math.max(map.getZoom(), 15));
   } else {
     meMarker.setLatLng(ll).setIcon(icon);
@@ -1451,7 +1451,9 @@ function onPosition(c, t) {
   if (Date.now() - lastSent > 30000 || (moved > 10 && Date.now() - lastSent > 3000)) sendSelf();
 }
 function startGeo() {
-  if (LITE) return; // plain http on a weak radio: the browser gives no position – the radio's GPS does (eudRadioPosition)
+  // plain http on a weak radio: the browser gives no position – the radio's GPS does (eudRadioPosition); with the
+  // Chrome setting "insecure origins treated as secure" the page counts as secure and the phone's GPS works too
+  if (LITE && !window.isSecureContext) return;
   if (bgGeo) {
     if (geoWatch != null) return;
     geoWatch = 'bg';
@@ -1474,10 +1476,38 @@ startGeo();
 setInterval(() => { if (Date.now() - lastSent > 30000) sendSelf(); }, 10000);
 
 map.on('dragstart', () => { follow = false; $('btnLocate').classList.remove('active'); });
+// weak radio without GPS fix (plain http: no position from the browser): set the own position by hand on the map –
+// sent like a GPS position (TAK position over mesh and server) until the radio's GPS has a fix
+let pickMe = false;
+function askPickMe() {
+  pickMe = true;
+  // Android Chrome can give the phone's own position on this http page with a one-time setting
+  const tip = /Android/.test(navigator.userAgent) && !store.get('eud.geoTip', false)
+    ? ' Tip (Android/Chrome): chrome://flags → "Insecure origins treated as secure" → add ' + location.origin + ' → Relaunch: then the phone\'s GPS works here too.' : '';
+  if (tip) store.set('eud.geoTip', true);
+  toast('No GPS fix yet – tap the map where you are (long press later to move it).' + tip, tip ? 15000 : 6000);
+}
+function setManualPos(ll) {
+  pickMe = false;
+  me = { lat: ll.lat, lon: ll.lng, alt: null, acc: 30, speed: null, course: null, t: Date.now(), manual: true };
+  store.set('eud.manualPos', { lat: me.lat, lon: me.lon, at: Date.now() });
+  drawMe();
+  sendSelf();
+  toast('Position set by hand – sent like GPS until the radio has a GPS fix.', 5000);
+}
+if (LITE) {
+  const mp = store.get('eud.manualPos', null);
+  if (mp && Date.now() - mp.at < 24 * 3600 * 1000) setTimeout(() => { if (!me) { me = { lat: mp.lat, lon: mp.lon, alt: null, acc: 30, t: Date.now(), manual: true }; drawMe(); } }, 1500);
+  map.on('contextmenu', e => {
+    if (me && !me.manual) return; // GPS works: nothing to set
+    if (confirm('Set my position here? (no GPS fix)')) setManualPos(e.latlng);
+  });
+}
 $('btnLocate').addEventListener('click', () => {
   follow = true;
   $('btnLocate').classList.add('active');
   if (me) map.setView([me.lat, me.lon], Math.max(map.getZoom(), 16));
+  else if (LITE) askPickMe();
   else toast('No position yet.');
 });
 $('btnLocate').classList.add('active');
@@ -2581,6 +2611,7 @@ function drawCorridor() {
   ]).addTo(map);
 }
 map.on('click', e => {
+  if (pickMe) return setManualPos(e.latlng); // own position by hand (weak radio without GPS fix)
   if (movingUid) return moveTo(e.latlng.lat, e.latlng.lng); // MOVE: tap = new position
   if (window.eudMapTap && window.eudMapTap(e.latlng)) return; // drawing shapes, picking a Bloodhound target (tools.js)
   if (tool) return placeMarker(e.latlng); // symbol selected: a tap places the marker (like ATAK)
@@ -2787,6 +2818,7 @@ const insecureRadio = () => MESH_ONLY && !LITE && !window.isSecureContext && loc
 // weak radio: the radio's own GPS position is this device's position (mesh.js)
 window.eudRadioPosition = pos => {
   if (!LITE || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return;
+  if (me && me.manual) { store.del('eud.manualPos'); toast('GPS fix – the position now comes from the radio.'); }
   onPosition({ latitude: pos.lat, longitude: pos.lon, altitude: pos.alt, accuracy: null, speed: pos.speed, heading: pos.course }, pos.time ? pos.time * 1000 : Date.now());
 };
 function updatePermBar() {
