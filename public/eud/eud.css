@@ -479,5 +479,9 @@ body.mesh-only:not(.radio-relay) .tile[data-tb="sync"], body.mesh-only:not(.radi
 #srvMesh { display: none; }
 body.mesh-only #srvMesh { display: block; }
 body.mesh-only:not(.radio-relay) #srvList, body.mesh-only:not(.radio-relay) #addSrvBtn, body.mesh-only section[data-sec="server"] > .hint { display: none !important; }
+/* weak radio (lite page over plain http, lib/meshsite.js): nothing that needs https in the browser – no camera/video,
+   microphone/voice, QR scanner; no permission bar (the position comes from the radio's GPS) */
+body.takweb-lite .tile[data-tb="video"], body.takweb-lite .tile[data-tb="voice"], body.takweb-lite #btnVideo,
+body.takweb-lite [data-tbtool="voice"], body.takweb-lite [data-tbtool="video"], body.takweb-lite #scanBtn, body.takweb-lite #permBar { display: none !important; }
 /* video (camera, helmet camera, watching feeds) through the TAKweb server named on the radio – over the phone's internet */
 body.mesh-only:not(.radio-relay) #btnVideo, body.mesh-only:not(.radio-relay) [data-tbtool="voice"], body.mesh-only:not(.radio-relay) [data-tbtool="video"], body.mesh-only #appBox { display: none !important; }

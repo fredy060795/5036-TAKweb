@@ -607,7 +607,7 @@
         b.type = 'button';
         if (/^https?:\/\//i.test(f.url)) {
           b.textContent = '▶';
-          b.onclick = () => { window.eud.closePopup(); window.eudPlay(f.alias, f.url); };
+          b.onclick = () => { window.eud.closePopup(); if (window.eudPlay) window.eudPlay(f.alias, f.url); else window.eud.toast('Video is not available on this radio – open the address e.g. in VLC.'); };
         } else {
           b.textContent = 'COPY';
           b.onclick = () => navigator.clipboard.writeText(f.url).then(() => toast('Address copied – open it e.g. in VLC.'), () => toast(f.url, 8000));

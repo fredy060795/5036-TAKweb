@@ -455,6 +455,8 @@
   // plain Meshtastic users (Meshtastic app, no TAK) as points on the map
   function showNode(num) {
     const n = nodes.get(num);
+    // weak radio (plain http, no position from the browser): the radio's own GPS is this device's position
+    if (num === myNode && n && n.position && window.eudRadioPosition) window.eudRadioPosition(n.position);
     if (!cfg.nodes || !n || num === myNode || n.takUid || !n.position) return;
     const heard = Math.max(n.lastHeard || 0, n.position.time || 0);
     if (!heard || Date.now() / 1000 - heard > NODE_MAX_AGE) return; // no time known: not shown as current

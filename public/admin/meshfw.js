@@ -10,6 +10,10 @@ const mb = n => (n / 1048576).toFixed(1) + ' MB';
 const hex = n => '0x' + n.toString(16);
 let versions = [];
 const LITE_TARGET = /^heltec-wireless-tracker/i; // like lib/meshsite.js
+// how the phone opens TAKweb on this radio: weak radios (lite) only over plain http
+const openText = d => LITE_TARGET.test((d && d.target) || '')
+  ? 'http://192.168.4.1 (this radio offers TAKweb only over http – no camera, voice or QR scan; the position comes from its GPS)'
+  : 'https://takweb.local – accept the certificate once';
 let busy = false;
 
 const curVersion = () => versions.find(v => v.key === $('fwVer').value);
@@ -205,7 +209,7 @@ $('fwGo').addEventListener('click', async () => {
     await espFlash({ port, files, eraseAll: full, baud: Number($('fwBaud').value), chip: d.chip, progress: bar, say: t => setMsg($('fwMsg'), t, true) });
     bar(100);
     setMsg($('fwMsg'), /takweb/i.test(v.key)
-      ? 'Done. The radio restarts and opens the WLAN "TAKweb" (password 12345678): connect the phone and open https://takweb.local (or https://192.168.4.1), accept the certificate once.'
+      ? 'Done. The radio restarts and opens the WLAN "TAKweb" (password 12345678): connect the phone and open ' + (LITE_TARGET.test(d.target || '') ? 'http://192.168.4.1 (only http on this radio).' : 'https://takweb.local (or https://192.168.4.1), accept the certificate once.')
       : `Done – ${d.name} runs Meshtastic ${v.version}.${full ? ' After a full install set the LoRa region (TAKweb: Meshtastic panel → SET REGION).' : ''}`, true);
   } catch (e) {
     setMsg($('fwMsg'), 'Not flashed: ' + (e.message || e));
@@ -488,7 +492,7 @@ async function finishSetup(f) {
   pendingFinish = null;
   $('suFinish').classList.add('hidden');
   suBar(100);
-  suSay(`Done! ${radioName(f.d)} has TAKweb${names.length ? ', the mesh channel ' + names.join(', ') : ''}${f.who ? ' and the TAK user ' + f.who.callsign : ''}. On the phone: WLAN "${ssid}"${f.ap.psk ? ` (password ${f.ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once${f.who ? '; with internet it logs in to the TAK server by itself' : ''}.`);
+  suSay(`Done! ${radioName(f.d)} has TAKweb${names.length ? ', the mesh channel ' + names.join(', ') : ''}${f.who ? ' and the TAK user ' + f.who.callsign : ''}. On the phone: WLAN "${ssid}"${f.ap.psk ? ` (password ${f.ap.psk})` : ' (open)'} → ${openText(f.d)}${f.who ? '; with internet it logs in to the TAK server by itself' : ''}.`);
 }
 $('suFinish').addEventListener('click', async () => {
   await stopMonitor();
@@ -564,7 +568,7 @@ function doneText(job, ssid) {
   const who = job.login && job.login.who;
   const name = ssid || job.ap.ssid || 'TAKweb-xxxx';
   return `Done! ${radioName(job.d)} has TAKweb${who ? ' and the TAK user ' + who.callsign : ''}. Phone: WLAN "${name}"`
-    + `${job.ap.psk ? ` (password ${job.ap.psk})` : ' (open)'} → https://takweb.local – accept the certificate once.`
+    + `${job.ap.psk ? ` (password ${job.ap.psk})` : ' (open)'} → ${openText(job.d)}.`
     + (job.chan || job.wantMqtt || job.gateway ? ' Opening the page sets the radio up as chosen here (channel, GPS' + (job.wantMqtt ? ', MQTT' : '') + (job.gateway ? ', internet WLAN' : '') + ') – it restarts once.' : '')
     + (who ? ' With internet it logs in to the TAK server by itself.' : '');
 }
