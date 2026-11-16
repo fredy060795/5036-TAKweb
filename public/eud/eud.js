@@ -2864,30 +2864,6 @@ $('permClose').addEventListener('click', () => $('permBar').classList.add('hidde
 // on the radio: is the TAKweb server reachable (the phone's mobile data)? Then offer TAKweb online
 if (MESH_ONLY) {
   let webUrl = '', invite = '', closed = false, onRadio = null;
-  // weak radio (lite page): a visible line how far the connection to the TAK server got – the radio's log cannot show it
-  // (the phone talks to the TAKweb server over its own internet)
-  let netStep = 'Server: starting …';
-  const netSay = t => { netStep = t; showNet(); };
-  function showNet() {
-    if (!LITE) return;
-    let el = document.getElementById('radioNet');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'radioNet';
-      el.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:1200;max-width:70vw;padding:3px 8px;border-radius:6px;'
-        + 'font:12px/1.3 sans-serif;background:rgba(0,0,0,.72);color:#fff;pointer-events:none';
-      document.body.append(el);
-    }
-    const srv = servers.find(x => x.radioKey) || servers.find(x => x.relay);
-    const c = srv ? connOf(srv) : null;
-    let t = netStep;
-    if (c && c.state === 'connected') t = 'TAK server: connected (' + srv.host + ')';
-    else if (c && c.state === 'connecting') t = 'TAK server: connecting to ' + srv.host + ' …';
-    else if (c && c.message) t = 'TAK server (' + c.state + '): ' + c.message;
-    el.textContent = t;
-    el.style.background = c && c.state === 'connected' ? 'rgba(20,110,40,.85)' : 'rgba(0,0,0,.72)';
-  }
-  if (LITE) setInterval(showNet, 2000);
   // set up in the admin: takweb-server.json on the radio holds the server and (optionally) this radio's TAK user.
   // That server comes first; an address the user typed only when the radio has none.
   const radioFile = () => onRadio || (onRadio = fetch('takweb-server.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : {})).catch(() => ({})));
@@ -2957,7 +2933,6 @@ if (MESH_ONLY) {
     let srv = servers.find(s => s.radioKey === key && s.certPem);
     if (!srv) {
       joining = true;
-      netSay('TAK server: logging in as ' + cfg.username + ' …');
       try {
         srv = newServer({ name: new URL(u).host, host: cfg.host, port: cfg.port || 8089, proto: 'ssl', enrollPort: cfg.enrollPort || 8446, username: cfg.username, radioKey: key, relay });
         for (let i = 0; i < 2; i++) {
@@ -2977,7 +2952,6 @@ if (MESH_ONLY) {
         saveServers();
       } catch (e) {
         toast('TAK server: ' + e.message, 5000);
-        netSay('TAK server login failed: ' + e.message);
         return;
       } finally { joining = false; }
     }
@@ -2992,15 +2966,11 @@ if (MESH_ONLY) {
   }
   async function checkOnline() {
     const u = await serverUrl();
-    if (!u) return netSay('No TAKweb server set on this radio (admin → flash the radio again).');
-    if (closed) return;
+    if (!u || closed) return;
     const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 6000);
     let ok = false;
     try { await fetch(new URL('icon-192.png?ping=' + Date.now(), u), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); ok = true; } catch (e) { /* offline */ }
     clearTimeout(t);
-    if (!ok) netSay('No internet to ' + new URL(u).host + ' – phone: allow mobile data while on this WLAN.');
-    else if (!invite) netSay('TAKweb server reachable – no TAK user set for this radio (admin).');
-    else if (netStep.startsWith('No internet') || netStep.startsWith('Server: starting')) netSay('TAKweb server reachable (' + new URL(u).host + ').');
     if (ok && invite) radioJoin().catch(() => {}); // the radio's TAK user logs in right here
   }
   setTimeout(checkOnline, 2500);
