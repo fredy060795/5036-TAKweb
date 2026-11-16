@@ -1494,6 +1494,17 @@ async function handleAdminApi(req, res, route) {
   }
   // the file system for one radio, flashed with the firmware: this server's pages + server address, the radio's TAK
   // user and WLAN name (lib/meshsite.js radioImage) – nothing has to be written over USB afterwards
+  // the setup for the radio's page: only known fields, short strings
+  const radioSetup = x => {
+    if (!x || typeof x !== 'object') return null;
+    const t = (v, n) => String(v == null ? '' : v).slice(0, n);
+    const out = {};
+    if (x.channel && /^https:\/\/meshtastic\.org\/e\//.test(String(x.channel))) out.channel = t(x.channel, 1500);
+    if (Number(x.gpsSecs) > 0) out.gpsSecs = Math.min(86400, Math.round(Number(x.gpsSecs)));
+    if (x.mqtt && x.mqtt.address) out.mqtt = { address: t(x.mqtt.address, 120), username: t(x.mqtt.username, 64), password: t(x.mqtt.password, 64), root: t(x.mqtt.root || 'opentakserver', 64), tls: x.mqtt.tls !== false };
+    if (x.gateway && x.gateway.ssid) out.gateway = { ssid: t(x.gateway.ssid, 32), psk: t(x.gateway.psk, 63) };
+    return Object.keys(out).length ? out : null;
+  };
   const fsi = /^firmware\/fsimage\/([\w.-]+)\/([\w.-]+)$/.exec(route);
   if (fsi && method === 'POST') {
     const file = firmwareLib.file(fsi[1], fsi[2]);
@@ -1505,6 +1516,7 @@ async function handleAdminApi(req, res, route) {
         site: meshsite.build(VERSION, server, body.map === 'full' ? 'full' : 'small'), server,
         invite: typeof body.invite === 'string' ? body.invite.slice(0, 2000) : '',
         ap: body.ap ? { ssid: String(body.ap.ssid || '').slice(0, 32), psk: String(body.ap.psk || '').slice(0, 63) } : null,
+        setup: radioSetup(body.setup),
       });
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': img.length, 'Cache-Control': 'no-store' });
       return res.end(img);
@@ -1874,19 +1886,20 @@ async function handle(req, res) {
       if (!admin) return json(res, 404, { error: 'Not found' });
       return await handleAdminApi(req, res, p.slice(11));
     }
-    if (p === '/api/app/register' && req.method === 'POST') return await handleRegister(req, res);
-    if (p.startsWith('/api/eud/')) {
+    // radio pages (takweb.local): the EUD API, the video sign-up and the access page's login data, from the phone
+    if (p.startsWith('/api/eud/') || p === '/api/app/register' || p.startsWith('/api/access/')) {
       const ro = radioOrigin(req.headers.origin);
       if (ro) {
         res.setHeader('Access-Control-Allow-Origin', ro);
         res.setHeader('Vary', 'Origin');
         if (req.method === 'OPTIONS') {
-          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '600' });
+          res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, X-Access-Token', 'Access-Control-Max-Age': '600' });
           return res.end();
         }
       }
-      return await handleEudApi(req, res, p.slice(9));
     }
+    if (p === '/api/app/register' && req.method === 'POST') return await handleRegister(req, res);
+    if (p.startsWith('/api/eud/')) return await handleEudApi(req, res, p.slice(9));
     if (p.startsWith('/api/access/')) return await handleAccessApi(req, res, p.slice(12));
     if (p === '/join' || p === '/access') return send(res, 302, '', 'text/plain', { Location: p + '/' });
     if (p.startsWith('/join/')) return serveStatic(res, 'join', decodeURIComponent(p.slice(6)));

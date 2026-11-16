@@ -1236,6 +1236,8 @@ test('radio pages (takweb.local, private addresses) may use the EUD API from the
     assert.equal(r.headers.get('access-control-allow-origin'), o);
     assert.match(r.headers.get('access-control-allow-headers'), /Content-Type/i);
   }
+  const reg = await fetch(base + '/api/app/register', { method: 'OPTIONS', headers: { Origin: 'https://takweb.local', 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(reg.headers.get('access-control-allow-origin'), 'https://takweb.local', 'video sign-up from the radio page');
   const evil = await fetch(base + '/api/eud/config', { headers: { Origin: 'https://evil.example' } });
   assert.equal(evil.headers.get('access-control-allow-origin'), null, 'other sites get no permission');
   const ok = await fetch(base + '/api/eud/config', { headers: { Origin: 'https://takweb.local' } });

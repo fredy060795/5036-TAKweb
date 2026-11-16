@@ -109,3 +109,28 @@ test('fountain code (port 257) is bit-identical to the Meshtastic ATAK plugin', 
   assert.deepEqual(P.parseFountain(ack).ack, { transferId: 0x123456, type: 2, received: 4, needed: 0, hash: bytes('ba626314ec76f1ea') });
   assert.equal(P.parseFountain(P.utf8.encode('x\u009c...')), null, 'plain zlib CoT is no fountain packet');
 });
+
+test('setup from the admin: only what differs is sent to the radio (channel, always send, GPS, MQTT, gateway WLAN)', () => {
+  const W = () => new P.Writer();
+  const link = 'https://meshtastic.org/e/#' + Buffer.from(W().msg(1, W().bytes(2, new Uint8Array(32).fill(5), true).str(3, 'TAK')).msg(2, W().uint(7, 3)).done()).toString('base64url');
+  const setup = { channel: link, gpsSecs: 120, mqtt: { address: 'tak.example.org:8883', username: 'm', password: 'p' }, gateway: { ssid: 'HQ', psk: 'hq-pass-1' } };
+  // a fresh radio: everything
+  let r = P.setupPackets(9, setup, { channels: [{ role: 1, name: '' }], loraRaw: W().uint(7, 3).done(), region: 3, positionRaw: null, mqtt: null, networkRaw: null });
+  assert.deepEqual(r.what, ['channel TAK', 'GPS', 'MQTT', 'internet WLAN HQ']);
+  assert.ok(r.packets.length >= 4);
+  // a radio that is set already: nothing (no restart on every page load)
+  const done = {
+    channels: [{ role: 1, name: 'TAK' }], loraRaw: W().uint(7, 3).bool(12, true).bool(105, true).done(), region: 3,
+    positionRaw: W().uint(1, 120).bool(2, true).uint(13, 1).done(), mqtt: { enabled: true, address: 'tak.example.org:8883', username: 'm' },
+    networkRaw: W().bool(1, true).str(3, 'HQ').done(),
+  };
+  assert.deepEqual(P.setupPackets(9, setup, done).what, []);
+  // only the duty-cycle override missing (no channel in the setup)
+  r = P.setupPackets(9, { gpsSecs: 120 }, { ...done, loraRaw: W().uint(7, 3).done() });
+  assert.deepEqual(r.what, ['always send']);
+  // GPS pins set by hand: cleared
+  assert.deepEqual(P.setupPackets(9, { gpsSecs: 120 }, { ...done, positionRaw: W().uint(1, 120).uint(12, 3).uint(13, 1).done() }).what, ['GPS']);
+  // moduleConfig from the radio is read
+  const fr = W().msg(9, W().msg(1, W().bool(1, true).str(2, 'a:8883').str(3, 'u'))).done();
+  assert.deepEqual(P.parseFromRadio(fr), { kind: 'moduleConfig', mqtt: { enabled: true, address: 'a:8883', username: 'u' } });
+});

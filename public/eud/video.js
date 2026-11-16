@@ -3,6 +3,8 @@
 'use strict';
 
 (() => {
+  // on a radio's page (takweb.local) the TAKweb server is the one named on the radio – reached over the phone's internet
+  const R = p => (window.eud && window.eud.relayUrl ? window.eud.relayUrl(p) : p);
   const { $, store, profile, toast, setMsg, openPopup } = window.eud;
   // the camera's Bluetooth protocol: PROTOCOL.md in the ESP32-Flash repository
   const SVC = '7b3c0001-6b1a-4d6e-9c55-3a2f1e0c8a01';
@@ -58,7 +60,7 @@
     if (link) return link;
     let res;
     try {
-      res = await fetch('/api/app/register', {
+      res = await fetch(R('/api/app/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: profile.callsign || 'EUD', unit: profile.team, source: 'eud' }),
@@ -76,8 +78,9 @@
   function connectServer() {
     clearTimeout(wsTimer);
     if (!running || !link) return;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sock = new WebSocket(`${proto}//${location.host}/ws/publish?u=${encodeURIComponent(link.u)}&s=${encodeURIComponent(link.s)}&k=${encodeURIComponent(link.k)}`);
+    const base = new URL(R('/ws/publish'), location.href);
+    const proto = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    const sock = new WebSocket(`${proto}//${base.host}/ws/publish?u=${encodeURIComponent(link.u)}&s=${encodeURIComponent(link.s)}&k=${encodeURIComponent(link.k)}`);
     ws = sock;
     sock.binaryType = 'arraybuffer';
     sock.onopen = () => { wsRetry = 0; };
@@ -409,12 +412,12 @@
   // HLS output) with hls.js through our own server, MP4/WebM directly. Otherwise a clear message + way out.
   let hls = null;
   let hlsLib = null;
-  const mediaProxy = u => '/api/eud/media?u=' + encodeURIComponent(u);
+  const mediaProxy = u => R('/api/eud/media?u=' + encodeURIComponent(u));
   function loadHlsLib() {
     if (hlsLib) return hlsLib;
     hlsLib = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/hls.min.js';
+      s.src = window.TAKWEB_MESH ? R('/eud/vendor/hls.min.js') : 'vendor/hls.min.js'; // not on the radio's flash
       s.onload = () => resolve(window.Hls);
       s.onerror = () => { hlsLib = null; reject(new Error('hls.js not available')); };
       document.head.append(s);
@@ -530,8 +533,8 @@
   function startTele(name, url) {
     stopTele();
     if (!window.EventSource || !/^(rtsps?|srt|https?):\/\//i.test(url)) return;
-    try { if (new URL(url).host === location.host) return; } catch (e) { return; } // own streams carry no KLV
-    const es = new EventSource('/api/eud/klv?u=' + encodeURIComponent(url) + '&n=' + encodeURIComponent(name || ''));
+    try { const h = new URL(url).host; if (h === location.host || h === new URL(R('/'), location.href).host) return; } catch (e) { return; } // own streams carry no KLV
+    const es = new EventSource(R('/api/eud/klv?u=') + encodeURIComponent(url) + '&n=' + encodeURIComponent(name || ''));
     tele = es;
     const chip = $('vwTele');
     es.addEventListener('cot', ev => {
@@ -627,7 +630,7 @@
     let token = '';
     try { token = localStorage.getItem('tak.access') || ''; } catch (e) { /* private mode */ }
     if (!token) return false;
-    const me = await fetch('/api/access/me', { headers: { 'X-Access-Token': token } }).then(r => r.ok ? r.json() : null).catch(() => null);
+    const me = await fetch(R('/api/access/me'), { headers: { 'X-Access-Token': token } }).then(r => r.ok ? r.json() : null).catch(() => null);
     if (!me || me.status !== 'active' || !me.password || !me.host) return false;
     droneUrl(me.host, me.username, me.password);
     $('droneAsk').classList.add('hidden');

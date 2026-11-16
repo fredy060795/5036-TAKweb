@@ -44,6 +44,7 @@
   let message = '';
   let myNode = 0, nonce = 0;
   let networkRaw = null; // the radio's network settings (WLAN)
+  let positionRaw = null, mqttCfg = null, setupChecked = false; // for the setup the admin put on the radio
   let loraRaw = null, region = -1, preset = -1, usePreset = true; // LoRa settings of the radio; region 0 = not set (silent)
   let pausedForVideo = false, retry = 0, retryTimer = null, pollTimer = null;
   let draining = false, drainAgain = false, writeChain = Promise.resolve(), httpFails = 0;
@@ -294,6 +295,20 @@
     } catch (e) { toast('Region not set: ' + e.message); }
   });
 
+  // the settings the admin chose when it set up this radio (in takweb-server.json, flashed with the file system):
+  // channel, GPS, MQTT, internet WLAN of a gateway – put onto the radio by this page, only what differs. So nothing has
+  // to be done over USB after the flash. The radio may restart (the page connects again by itself).
+  async function radioSetup() {
+    let j = {};
+    try { j = await fetch('takweb-server.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : {})); } catch (e) { return; }
+    const r = P.setupPackets(myNode, j.setup, { channels, loraRaw, region, positionRaw, mqtt: mqttCfg, networkRaw });
+    if (!r.packets.length) return;
+    toast('Setting up this radio as chosen in the admin: ' + r.what.join(', ') + ' – it restarts.', 8000);
+    for (const pkt of r.packets) { await write(pkt); await new Promise(res => setTimeout(res, 400)); }
+    await new Promise(res => setTimeout(res, 800));
+    await write(P.adminReboot(myNode, 2)).catch(() => {});
+  }
+
   // put a Meshtastic channel link onto the radio (channels + LoRa settings); the radio may restart
   $('meshChanGo').addEventListener('click', async () => {
     if (state !== 'connected' || !myNode) return;
@@ -364,6 +379,8 @@
     try { m = P.parseFromRadio(buf); } catch (e) { return; }
     if (m.kind === 'myInfo') myNode = m.nodeNum;
     else if (m.kind === 'config' && m.network) networkRaw = m.network;
+    else if (m.kind === 'config' && m.position) positionRaw = m.position;
+    else if (m.kind === 'moduleConfig' && m.mqtt) mqttCfg = m.mqtt;
     else if (m.kind === 'config' && m.lora) { loraRaw = m.lora; region = m.region; preset = m.preset; usePreset = m.usePreset; }
     else if (m.kind === 'channel') {
       channels = channels.filter(c => c.index !== m.channel.index);
@@ -378,6 +395,7 @@
       retry = 0;
       if (!channels.some(c => c.index === cfg.channel)) { cfg.channel = 0; save(); }
       setState('connected');
+      if (ON_RADIO && !setupChecked) { setupChecked = true; radioSetup().catch(() => {}); }
       toast(region === 0 ? 'Meshtastic connected – but the LoRa region is NOT set: the radio is silent. Set it under Meshtastic.' : 'Meshtastic connected: ' + (cfg.name || 'radio'), region === 0 ? 10000 : undefined);
       lastPli = 0; // send our position right away
       tick();
