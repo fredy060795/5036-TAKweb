@@ -96,7 +96,8 @@ function radioRelayOn() {
   // lite page (small radio): what is not on the radio comes from the TAKweb server too (in this order)
   const lite = (window.TAKWEB_LITE || []).map(n => ({ 'milsymbol.js': '/eud/vendor/milsymbol.js' })[n] || '/eud/' + n);
   if (lite.length) window.CODEC2_URL = new URL('/eud/codec2.wasm', RELAY).href;
-  for (const src of ['/eud/vendor/jsQR.js', '/eud/view3d.js', ...lite]) {
+  // QR scanner needs the camera (https) – not on a weak radio's plain-http page
+  for (const src of [...(lite.length ? [] : ['/eud/vendor/jsQR.js']), '/eud/view3d.js', ...lite]) {
     const s = document.createElement('script');
     s.src = new URL(src, RELAY).href;
     s.async = false;
@@ -112,6 +113,9 @@ const PUBLIC_TILES = {
   esritopo: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
 };
 if (MESH_ONLY) document.body.classList.add('mesh-only');
+// weak radio (lite page over plain http): limited TAKweb – see lib/meshsite.js
+const LITE = MESH_ONLY && Array.isArray(window.TAKWEB_LITE);
+if (LITE) document.body.classList.add('takweb-lite');
 // on the radio: a link to the TAKweb server that tells it about this radio – TAKweb online then talks to the mesh
 // through this radio over WLAN (Meshtastic → "Radio over WLAN"), login/QR/video come from the server
 // a server address without a path (only the domain) means TAKweb at /eud/ – the domain itself is the admin
@@ -1447,6 +1451,7 @@ function onPosition(c, t) {
   if (Date.now() - lastSent > 30000 || (moved > 10 && Date.now() - lastSent > 3000)) sendSelf();
 }
 function startGeo() {
+  if (LITE) return; // plain http on a weak radio: the browser gives no position – the radio's GPS does (eudRadioPosition)
   if (bgGeo) {
     if (geoWatch != null) return;
     geoWatch = 'bg';
@@ -2778,8 +2783,14 @@ const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platfor
 let permAsked = false;
 // on the radio's own WLAN the page may come over http (captive portal, http://takweb/): the browser then gives no
 // position, compass or microphone – offer the same page over https (the radio's self-signed certificate, once)
-const insecureRadio = () => MESH_ONLY && !window.isSecureContext && location.protocol === 'http:';
+const insecureRadio = () => MESH_ONLY && !LITE && !window.isSecureContext && location.protocol === 'http:';
+// weak radio: the radio's own GPS position is this device's position (mesh.js)
+window.eudRadioPosition = pos => {
+  if (!LITE || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return;
+  onPosition({ latitude: pos.lat, longitude: pos.lon, altitude: pos.alt, accuracy: null, speed: pos.speed, heading: pos.course }, pos.time ? pos.time * 1000 : Date.now());
+};
 function updatePermBar() {
+  if (LITE) { $('permBar').classList.add('hidden'); return; } // plain http: nothing to allow, the position comes from the radio
   if (insecureRadio()) {
     $('permGo').textContent = 'HTTPS';
     $('permText').textContent = 'Opened over http – here the browser gives no own position, compass or microphone (mesh, map and chat work). '

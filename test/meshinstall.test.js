@@ -89,7 +89,7 @@ test('meshsite: TAKweb for the radio – flat names, gzipped, mesh-only flag, no
   assert.match(idx, /9\.9\.9/);
 });
 
-test('meshsite lite (radios without PSRAM): one page with everything for the basic functions, the rest from the server', () => {
+test('meshsite lite (weak radios, plain http): one page with the basic functions, no camera/microphone parts, the rest from the server', () => {
   const b = meshsite.build('9.9.9', 'https://tak.example.org/eud/', 'full', true);
   assert.deepEqual(b.files.map(f => f.name), ['index.html', 'worldmap.json']);
   assert.equal(b.map, 'small', 'always the small world map');
@@ -97,7 +97,9 @@ test('meshsite lite (radios without PSRAM): one page with everything for the bas
   const idx = zlib.gunzipSync(b.files[0].gz).toString();
   // no further file is requested at the start: no external scripts, stylesheets or images
   assert.doesNotMatch(idx, /<script src=|<link rel="(stylesheet|icon|apple-touch-icon)"|src="[\w-]+\.png"/);
-  assert.match(idx, /window\.TAKWEB_MESH = true; window\.TAKWEB_LITE = \["milsymbol\.js","video\.js","data\.js","codec2\.js","voice\.js"\]/);
+  assert.match(idx, /window\.TAKWEB_MESH = true; window\.TAKWEB_LITE = \["milsymbol\.js","data\.js"\]/);
+  // nothing that needs https in the browser: camera/video, microphone/voice (Codec 2)
+  assert.ok(!/window\.eudVoice = \{|window\.Codec2 = |window\.eudPlay = play/.test(idx), 'no video, voice, codec2');
   assert.match(idx, /window\.TAKWEB_SERVER = "https:\/\/tak\.example\.org\/eud\/"/);
   for (const marker of ['L.Map', 'window.eudMeshReady = true', 'window.meshProto', 'eudToolsApi', '.leaflet-container']) assert.ok(idx.includes(marker), marker);
   assert.ok(!idx.includes('ms.Symbol = function') && !/MilSymbol|milsymbol\.js"\)/.test(idx.replace(/TAKWEB_LITE = \[[^\]]*\]/, '')), 'milsymbol not inlined');
