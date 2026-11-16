@@ -264,7 +264,7 @@ function renderOverview() {
     L.control.layers(null, { 'Markers & drawings': ov.objs, 'Areas': ov.fences }, { position: 'topleft' }).addTo(maps.overview);
   }
   renderFilters($('ovFilters'));
-  const shown = S.devices.filter(passes);
+  const shown = S.devices.filter(passes).filter(d => Number.isFinite(d.lat)); // without a position yet: in the troop list only
   ov.devs.clearLayers();
   for (const d of shown) {
     ov.devs.addLayer(L.marker([d.lat, d.lon], { icon: deviceIcon(d), zIndexOffset: 1000 })
@@ -334,7 +334,7 @@ function renderTroops() {
     el('td', { text: d.speed > 0.5 ? (d.speed * 3.6).toFixed(0) + ' km/h' : '–' }),
     el('td', { text: d.battery ? d.battery + ' %' : '–' }),
     el('td', { class: 'small mut', text: (d.mesh ? '📡 Mesh ' : '') + (d.platform || '') }),
-    el('td', {}, el('button', { type: 'button', text: '⌖', title: 'Show on the map', onclick: () => { showPage('overview'); maps.overview.setView([d.lat, d.lon], 16); } })))));
+    el('td', {}, Number.isFinite(d.lat) ? el('button', { type: 'button', text: '⌖', title: 'Show on the map', onclick: () => { showPage('overview'); maps.overview.setView([d.lat, d.lon], 16); } }) : el('span', { class: 'mut small', text: 'no position' })))));
 }
 for (const id of ['trSearch', 'trTeam', 'trOnline']) $(id).addEventListener('input', renderTroops);
 
@@ -353,12 +353,12 @@ function renderFences() {
     fences = JSON.parse(JSON.stringify(S.fences || []));
     const all = fences.flatMap(f => (f.kind === 'circle' ? [[f.lat, f.lon]] : f.points));
     if (all.length) maps.fences.fitBounds(L.latLngBounds(all), { maxZoom: 16, padding: [40, 40] });
-    else if (S.devices.length) maps.fences.fitBounds(L.latLngBounds(S.devices.map(d => [d.lat, d.lon])), { maxZoom: 15 });
+    else if (S.devices.some(d => Number.isFinite(d.lat))) maps.fences.fitBounds(L.latLngBounds(S.devices.filter(d => Number.isFinite(d.lat)).map(d => [d.lat, d.lon])), { maxZoom: 15 });
     drawFenceList();
   }
   fc.layer.clearLayers();
   for (const f of fences) fc.layer.addLayer(fenceLayer(f));
-  for (const d of S.devices.filter(x => x.online)) fc.layer.addLayer(L.marker([d.lat, d.lon], { icon: deviceIcon(d) }).bindTooltip(esc(d.callsign), { className: 'lbl', direction: 'right' }));
+  for (const d of S.devices.filter(x => x.online && Number.isFinite(x.lat))) fc.layer.addLayer(L.marker([d.lat, d.lon], { icon: deviceIcon(d) }).bindTooltip(esc(d.callsign), { className: 'lbl', direction: 'right' }));
   renderEvents($('fcEvents'), allEvents.filter(e => /^fence/.test(e.kind)).slice(-50).reverse());
 }
 function drawFenceList() {
