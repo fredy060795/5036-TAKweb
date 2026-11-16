@@ -93,10 +93,15 @@ function radioRelayOn() {
   document.body.classList.add('radio-relay');
   if (relayOn || !RELAY) return;
   relayOn = true;
-  for (const src of ['/eud/vendor/jsQR.js', '/eud/view3d.js']) {
+  // lite page (small radio): what is not on the radio comes from the TAKweb server too (in this order)
+  const lite = (window.TAKWEB_LITE || []).map(n => ({ 'milsymbol.js': '/eud/vendor/milsymbol.js' })[n] || '/eud/' + n);
+  if (lite.length) window.CODEC2_URL = new URL('/eud/codec2.wasm', RELAY).href;
+  for (const src of ['/eud/vendor/jsQR.js', '/eud/view3d.js', ...lite]) {
     const s = document.createElement('script');
     s.src = new URL(src, RELAY).href;
     s.async = false;
+    // military symbols arrived: draw the markers again with them
+    if (src.endsWith('/milsymbol.js')) s.onload = () => { symCache.clear(); for (const it of items.values()) { try { drawItem(it); } catch (e) { /* next */ } } };
     document.body.append(s);
   }
 }
@@ -406,8 +411,21 @@ function sidcFor(type) {
 const AFF_NAMES = { f: 'Friendly', h: 'Hostile', n: 'Neutral', u: 'Unknown', a: 'Assumed friend', s: 'Suspect', p: 'Pending' };
 
 const symCache = new Map();
+// without milsymbol (lite page of a small radio until the TAKweb server sent it): a simple shape in the affiliation
+// colour – friend rectangle, hostile diamond, neutral square, unknown circle (like the frames of the real symbols)
+function plainSymbol(sidc, size) {
+  const a = (sidc[1] || 'U').toUpperCase();
+  const col = ({ F: '#80e0ff', A: '#80e0ff', D: '#80e0ff', M: '#80e0ff', H: '#ff8080', S: '#ff8080', J: '#ff8080', K: '#ff8080', N: '#aaffaa', L: '#aaffaa' })[a] || '#ffff80';
+  const w = Math.round(size * 1.4), h = size, c = 'stroke="#000" stroke-width="1.5"';
+  const shape = /[HSJK]/.test(a) ? `<path d="M${w / 2} 1 L${w - 1} ${h / 2} L${w / 2} ${h - 1} L1 ${h / 2} Z" fill="${col}" ${c}/>`
+    : /[NL]/.test(a) ? `<rect x="${(w - h) / 2 + 1}" y="1" width="${h - 2}" height="${h - 2}" fill="${col}" ${c}/>`
+      : /[FADM]/.test(a) ? `<rect x="1" y="${h * 0.15}" width="${w - 2}" height="${h * 0.7}" fill="${col}" ${c}/>`
+        : `<circle cx="${w / 2}" cy="${h / 2}" r="${h / 2 - 1}" fill="${col}" ${c}/>`;
+  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${shape}</svg>`, w, h, a: { x: w / 2, y: h / 2 } };
+}
 function symbolSvg(sidc, size = 26) {
   const key = sidc + size;
+  if (!window.ms) return plainSymbol(sidc, size);
   if (!symCache.has(key)) {
     let s = null;
     try { s = new ms.Symbol(sidc, { size }); if (!s.isValid()) s = null; } catch (e) { s = null; }
@@ -1480,7 +1498,7 @@ const FUNCTIONS = {
 const fnLabel = {};
 for (const [dim, list] of Object.entries(FUNCTIONS)) for (const [fn, label] of list) fnLabel[`${dim}-${fn}`] = label;
 // only offer functions that milsymbol knows as a valid 2525 symbol
-const validType = type => { try { return new ms.Symbol(sidcFor(type), { size: 20 }).isValid(); } catch (e) { return false; } };
+const validType = type => { if (!window.ms) return /^a-[a-z]-[A-Z]/.test(type); try { return new ms.Symbol(sidcFor(type), { size: 20 }).isValid(); } catch (e) { return false; } };
 for (const dim of Object.keys(FUNCTIONS)) FUNCTIONS[dim] = FUNCTIONS[dim].filter(([fn]) => validType(`a-f-${dim}-${fn}`));
 
 function toolName(type) {
@@ -1563,7 +1581,7 @@ function placeMarker(latlng) {
 // buttons in the marker popup (video, rename, delete) – for the 2D and the 3D map
 function wirePopup(root, close) {
   const play = root.querySelector('[data-play]');
-  if (play) play.addEventListener('click', () => { close(); window.eudPlay(play.dataset.name, play.dataset.play); });
+  if (play) play.addEventListener('click', () => { close(); if (window.eudPlay) window.eudPlay(play.dataset.name, play.dataset.play); else toast('Video needs the TAKweb server (internet).'); });
   const msg = root.querySelector('[data-msg]');
   if (msg) msg.addEventListener('click', () => { close(); openChat('dm:' + msg.getAttribute('data-msg')); });
   const hound = root.querySelector('[data-hound]');

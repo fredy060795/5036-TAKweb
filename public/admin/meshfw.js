@@ -9,6 +9,7 @@ const bar = p => { $('fwBar').classList.remove('hidden'); $('fwFill').style.widt
 const mb = n => (n / 1048576).toFixed(1) + ' MB';
 const hex = n => '0x' + n.toString(16);
 let versions = [];
+const LITE_TARGET = /^heltec-wireless-tracker/i; // like lib/meshsite.js
 let busy = false;
 
 const curVersion = () => versions.find(v => v.key === $('fwVer').value);
@@ -368,8 +369,8 @@ async function radioPortAgain(old, info, ms = 40000) {
 
 // after the flash, over the radio's serial API (Meshtastic runs now; waits for its first start): the address of this
 // TAKweb server (the radio page offers "TAKweb online" with it) and the mesh channel
-async function syncPages(inst, chip) {
-  const mapQ = chip === 'esp32s3' ? '?map=full' : '';
+async function syncPages(inst, chip, lite) {
+  const mapQ = lite ? '?lite=1' : chip === 'esp32s3' ? '?map=full' : '';
   const want = await (await fetch('/api/eud/meshsite' + mapQ, { cache: 'no-store' })).json();
   const n = await inst.syncPages(want, async name => new Uint8Array(await (await fetch('/api/eud/meshsite/' + encodeURIComponent(name) + mapQ, { cache: 'no-store' })).arrayBuffer()),
     { onProgress: (done, total) => suSay(`Updating the radio's pages: ${Math.round(done * 100 / total)} %`), log: t => log(t + '\n') });
@@ -444,7 +445,7 @@ async function finishRadio(port, url, server, invite, ap, net = {}) {
     log(`WLAN of the radio: ${ssid}${ap.psk ? '' : ' (open)'}\n`);
     // the pages in the firmware's file system are as old as that firmware build – bring them to this server's version
     // (only what differs; same gzip = same size), otherwise the radio keeps old pages that ignore the server address
-    if (!net.filesInImage) try { await again('Pages', () => syncPages(inst, net.chip)); } catch (e) { log('Pages not updated – the radio keeps its pages from the firmware.\n'); }
+    if (!net.filesInImage) try { await again('Pages', () => syncPages(inst, net.chip, net.lite)); } catch (e) { log('Pages not updated – the radio keeps its pages from the firmware.\n'); }
     let names = [];
     if (!url && inst.lora) { // crisis radios always send (a channel link sets it with its LoRa settings)
       await link.send(P.adminSetLora(st.node, inst.lora, inst.region));
@@ -583,7 +584,7 @@ async function afterFlash(job) {
       const p2 = await allowedPort(i => i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId, 20000);
       if (p2) {
         try {
-          ({ node, ssid } = await finishRadio(p2, job.chan, server, invite, job.ap, { mqtt, gateway: job.gateway, chip: job.d.chip, info: app, filesInImage: true, quick: true }));
+          ({ node, ssid } = await finishRadio(p2, job.chan, server, invite, job.ap, { mqtt, gateway: job.gateway, chip: job.d.chip, lite: LITE_TARGET.test(job.d.target || ''), info: app, filesInImage: true, quick: true }));
         } catch (e) { log('Settings over USB not possible (' + (e.message || e) + ') – the radio\'s page does it.\n'); }
       }
     }
@@ -600,7 +601,7 @@ async function afterFlash(job) {
     '"3. Finish the setup" and choose the radio in the list (no new flash).';
   const fits = (i, p) => (app ? i.usbVendorId === app.usbVendorId && i.usbProductId === app.usbProductId : i.usbVendorId !== ESPRESSIF || p === job.flashed);
   const p2 = (app || !job.flashed || job.flashed.getInfo().usbVendorId !== ESPRESSIF) ? await allowedPort(fits, 45000) : null;
-  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, info: app }, d: job.d, who };
+  pendingFinish = { port: p2, info: app || (p2 && p2.getInfo()), chan: job.chan, server, invite, ap: job.ap, net: { mqtt, gateway: job.gateway, chip: job.d.chip, lite: LITE_TARGET.test(job.d.target || ''), info: app }, d: job.d, who };
   if (!p2) { showStep('suFinish'); throw new Error(replug); }
   suBar(90);
   await finishSetup(pendingFinish);
@@ -696,7 +697,8 @@ $('suGo').addEventListener('click', async () => {
       suSay('Preparing the radio\'s file system …');
       const r = await fetch(`/api/admin/firmware/fsimage/${encodeURIComponent(v.key)}/${encodeURIComponent(f.littlefs)}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'helm' },
-        body: JSON.stringify({ map: d.chip === 'esp32s3' ? 'full' : 'small', invite, ap: job.ap, setup }),
+        // radios without PSRAM (Heltec Wireless Tracker): the one-file page, the rest comes from the TAKweb server
+        body: JSON.stringify({ map: d.chip === 'esp32s3' ? 'full' : 'small', lite: LITE_TARGET.test(d.target || d.id || ''), invite, ap: job.ap, setup }),
       });
       if (r.ok) {
         job.files.push({ address: f.fsOff, data: new Uint8Array(await r.arrayBuffer()) });

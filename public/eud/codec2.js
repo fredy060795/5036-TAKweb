@@ -18,7 +18,8 @@
 
   let ready = null;
   // bytes: the wasm file (ArrayBuffer / Buffer) – in the browser it is fetched from url
-  function load(bytes, url = 'codec2.wasm') {
+  // url: next to the page – or from the TAKweb server (lite page of a small radio: window.CODEC2_URL, eud.js)
+  function load(bytes, url = (typeof window !== 'undefined' && window.CODEC2_URL) || 'codec2.wasm') {
     if (ready) return ready;
     const src = bytes ? Promise.resolve(bytes) : fetch(url).then(r => { if (!r.ok) throw new Error('codec2.wasm not found'); return r.arrayBuffer(); });
     ready = src.then(b => WebAssembly.instantiate(b, { env })).then(r => r.instance.exports).catch(e => { ready = null; throw e; });
