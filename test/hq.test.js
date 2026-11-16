@@ -101,3 +101,36 @@ test('hq: clean up – earlier events hidden, offline users and map objects out 
   assert.equal(st.objects.length, 0);
   assert.equal(st.log.length, 1, 'the situation log stays');
 });
+
+test('hq: a device reporting over the internet is not replaced by its copy over the mesh (MQTT / gateway)', () => {
+  const { hq } = make();
+  hq.cot(pli('ANDROID-7', 47.30, 11.40, { cs: 'Bravo-7' }));                    // direct (radio page over internet)
+  hq.cot(pli('ANDROID-7', 47.20, 11.30, { cs: 'Bravo-7', mesh: true }).replace('</detail>', '<__mqtt gateway="!0000c0de"/></detail>')); // older LoRa copy
+  let d = hq.state().devices.find(x => x.uid === 'ANDROID-7');
+  assert.equal(d.online, true);
+  assert.equal(d.mesh, false, 'still the direct device');
+  assert.equal(d.platform, 'ATAK-CIV');
+  assert.equal(d.lat, 47.30, 'position of the direct report');
+  // the direct link breaks off (TAK server: t-x-d-d) – then the mesh copy keeps it online, as a mesh device
+  const t = new Date().toISOString();
+  hq.cot(`<event version="2.0" uid="dd-1" type="t-x-d-d" how="h-g-i-g-o" time="${t}" start="${t}" stale="${t}"><point lat="0" lon="0" hae="0" ce="0" le="0"/><detail><link uid="ANDROID-7" relation="p-p" type="a-f-G-U-C"/></detail></event>`);
+  assert.equal(hq.state().devices.find(x => x.uid === 'ANDROID-7').online, false);
+  hq.cot(pli('ANDROID-7', 47.21, 11.31, { cs: 'Bravo-7', mesh: true }));
+  d = hq.state().devices.find(x => x.uid === 'ANDROID-7');
+  assert.deepEqual([d.online, d.mesh, d.lat], [true, true, 47.21]);
+});
+
+test('hq: a device without a position yet (0,0) is online, keeps its last position and leaves no area by it', () => {
+  const { hq } = make();
+  hq.setFences([{ name: 'Base', kind: 'circle', lat: 47.5, lon: 11.5, radius: 500, base: true, alert: true }]);
+  hq.cot(pli('PHONE-1', 0, 0, { cs: 'NoFix' }));
+  let d = hq.state().devices.find(x => x.uid === 'PHONE-1');
+  assert.ok(d && d.online, 'listed and online');
+  assert.ok(!Number.isFinite(d.lat), 'no position');
+  hq.cot(pli('PHONE-1', 47.5, 11.5, { cs: 'NoFix' }));                         // inside the base
+  const events = hq.state().events.length;
+  hq.cot(pli('PHONE-1', 0, 0, { cs: 'NoFix' }));                               // fix lost
+  d = hq.state().devices.find(x => x.uid === 'PHONE-1');
+  assert.deepEqual([d.online, d.lat, d.lon], [true, 47.5, 11.5]);
+  assert.equal(hq.state().events.length, events, 'no departure event');
+});

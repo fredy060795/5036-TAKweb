@@ -144,3 +144,12 @@ test('netmap: a phone gateway that goes offline raises an alarm', () => {
   const a = net.check(t0 + 16 * 60000);
   assert.ok(a.some(x => x.alert && /PHONE-GW \(phone gateway\) silent/.test(x.text)), JSON.stringify(a));
 });
+
+test('netmap: the mesh copy of a device that reports over the internet keeps it "internet"', () => {
+  const { net, feed } = make();
+  feed(pli('ANDROID-7', 47.3, 11.4));
+  feed(ots('ANDROID-7', 47.2, 11.3, '0a0b0c0d').replace('</detail>', '<__mqtt gateway="!0000c0de" hops="1"/></detail>'));
+  const n = net.picture().nodes.find(x => x.uid === 'ANDROID-7');
+  assert.equal(n.kind, 'internet');
+  assert.equal(n.link, 'internet');
+});

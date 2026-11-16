@@ -597,7 +597,9 @@
         const row = document.createElement('div');
         row.className = 'item';
         const t = document.createElement('span');
-        t.textContent = f.alias;
+        // name + start of the broadcast, so the running stream is easy to pick
+        const since = f.startedAt ? new Date(f.startedAt) : null;
+        t.textContent = f.alias + (since && !isNaN(since) ? ' · since ' + since.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
         const s = document.createElement('small');
         s.textContent = f.url;
         t.append(s);

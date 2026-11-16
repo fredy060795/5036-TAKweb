@@ -17,6 +17,8 @@ services:
       - "5036:5036"
     environment:
       PORT: 5036
+      # time zone for the start time in video feed names in the TAK server (e.g. "cam/bravo-7-14.32")
+      TZ: Europe/Berlin
       PUBLIC_URL: https://tak.example.com:5036
       # Admin reachable only under this address (optional, otherwise delete the line):
       # ADMIN_HOST: admin.example.com

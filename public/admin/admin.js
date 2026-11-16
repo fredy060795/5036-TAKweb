@@ -521,7 +521,7 @@ async function refresh() {
 const sid = s => s.user + '/' + s.streamId;
 
 // ---------- Streams into the TAK server automatically (OpenTAKServer/MediaMTX) ----------
-let takVideo = { ready: false, auto: true, when: 'all', prefix: 'cam' };
+let takVideo = { ready: false, auto: true, when: 'live', prefix: 'cam' };
 
 function renderTakVideo() {
   $('tvAuto').checked = !!takVideo.auto;
