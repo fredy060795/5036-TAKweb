@@ -532,9 +532,11 @@ versions), update only, the files to download (.uf2 for nRF52/RP2040).
   per radio and switched when the phone is in another radio's WLAN. Lost radio: block its TAK user in the admin.
 - **iPhone without Bluetooth (Safari):** on the normal TAKweb page the Meshtastic menu opens "Radio over WLAN" – put the
   radio on the phone's hotspot (fixed address 172.20.10.14) and connect over WLAN.
-- **TAKweb online:** when the phone has internet (its mobile data), the radio page shows "TAKWEB ONLINE". It opens TAKweb
-  from the server – login/QR, certificate, video, camera – and that page uses this radio over WLAN for the mesh
-  (Meshtastic → Radio over WLAN, set by itself). Without internet the radio page stays: map, positions, chat over the mesh.
+- **Everything of TAKweb online, right on the radio's page:** with internet (the phone's mobile data) the radio's page
+  uses the TAKweb server named on the radio for all of it – TAK servers (add your own), video (camera, helmet camera,
+  feeds), data packages, Data Sync, overlays, voice, QR scanner and 3D map (the code not on the radio's flash is loaded
+  from that server). There is no switch to another page any more. A radio without a TAKweb server: enter one under the
+  server button (or scan an invitation QR).
 - **Crisis radios always send:** setting up a radio (admin, installer, channel link) switches the duty-cycle override
   on; the TAKweb firmware also has it on from the start and sends whatever the channel load. (In the EU the 10 % duty
   cycle of 869.4–869.65 MHz is a legal limit – the override is the operator's decision.)

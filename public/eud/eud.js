@@ -86,7 +86,21 @@ const TILE_BASE = new URL('tiles/', location.href).pathname; // /eud/tiles/
 // TAKweb loaded from a Meshtastic radio's flash (lib/meshsite.js): no TAKweb server – mesh only, map tiles straight from
 // the internet if the phone has any (kept on the phone for later), below them the offline world map from the radio
 const MESH_ONLY = !!window.TAKWEB_MESH;
-if (MESH_ONLY) { const r = servers.find(s => s.relay); if (r) { RELAY = r.relay; document.body.classList.add('radio-relay'); } } // the radio's TAK login (see radioJoin)
+// on the radio with a TAKweb server: everything like on the normal page – what is not on the radio's flash (QR scanner,
+// 3D map) comes from that server; the menus (data packages, overlays, Data Sync, voice) work through it
+let relayOn = false;
+function radioRelayOn() {
+  document.body.classList.add('radio-relay');
+  if (relayOn || !RELAY) return;
+  relayOn = true;
+  for (const src of ['/eud/vendor/jsQR.js', '/eud/view3d.js']) {
+    const s = document.createElement('script');
+    s.src = new URL(src, RELAY).href;
+    s.async = false;
+    document.body.append(s);
+  }
+}
+if (MESH_ONLY) { const r = servers.find(s => s.relay); if (r) { RELAY = r.relay; window.addEventListener('DOMContentLoaded', radioRelayOn); setTimeout(radioRelayOn, 0); } } // the radio's TAK login (see radioJoin)
 const PUBLIC_TILES = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', topo: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
   sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -549,7 +563,7 @@ function videoUrl(c) {
 function browserVideoUrl(u) {
   try {
     const url = new URL(u);
-    if (url.origin === location.origin) url.pathname = url.pathname.replace(/\/(stream\.ts|index\.m3u8|snapshot\.jpg)$/, '');
+    if (url.origin === location.origin || (RELAY && url.origin === new URL(RELAY).origin)) url.pathname = url.pathname.replace(/\/(stream\.ts|index\.m3u8|snapshot\.jpg)$/, '');
     return url.href;
   } catch (e) { return u; }
 }
@@ -981,7 +995,8 @@ function renderChat() {
       const a = document.createElement('audio');
       a.controls = true;
       a.preload = 'none';
-      a.src = new URL(vm[1]).origin === location.origin ? vm[1] : new URL(new URL(vm[1]).pathname, location.href).href;
+      // the own TAKweb server (on a radio's page: the one named on the radio) – voice messages are kept there
+      a.src = new URL(vm[1]).origin === location.origin ? vm[1] : MESH_ONLY ? (RELAY ? relayUrl(new URL(vm[1]).pathname) : vm[1]) : new URL(new URL(vm[1]).pathname, location.href).href;
       a.className = 'cm-audio';
       txt.textContent = m.text.replace(vm[1], '').trim();
       d.append(a);
@@ -2284,11 +2299,11 @@ function decodeImage(source, w, h) {
 }
 function onQr(text) {
   stopScan();
-  // on the radio: an invitation link of a TAKweb server opens that server (its certificate request needs it)
-  if (MESH_ONLY && /^https?:\/\//i.test(text)) {
-    try { store.set('eud.webUrl', new URL(text).origin + '/eud/'); } catch (e) { /* keep */ }
-    location.href = radioLink(text);
-    return;
+  // on the radio without a TAKweb server: an invitation link opens that server (its certificate request needs it);
+  // with one, the code is used right here like on the normal page
+  if (MESH_ONLY && !RELAY && /^https?:\/\//i.test(text)) {
+    // a TAKweb invitation: its server becomes this page's TAKweb server, then the login is used right here
+    try { RELAY = new URL(text).origin; store.set('eud.webUrl', RELAY + '/eud/'); radioRelayOn(); } catch (e) { /* not a link */ }
   }
   try {
     applyConfig(parseQr(text), true);
@@ -2746,12 +2761,8 @@ let permAsked = false;
 // on the radio's own WLAN the page may come over http (captive portal, http://takweb/): the browser then gives no
 // position, compass or microphone – offer the same page over https (the radio's self-signed certificate, once)
 const insecureRadio = () => MESH_ONLY && !window.isSecureContext && location.protocol === 'http:';
-let radioOnline = false; // on the radio: the TAKweb server is reachable – "TAKweb online" is offered instead
 function updatePermBar() {
   if (insecureRadio()) {
-    // online the full TAKweb has position, camera and microphone – then only the "TAKweb online" bar shows
-    $('permBar').classList.toggle('hidden', radioOnline);
-    if (radioOnline) return;
     $('permGo').textContent = 'HTTPS';
     $('permText').textContent = 'Opened over http – here the browser gives no own position, compass or microphone (mesh, map and chat work). '
       + 'HTTPS opens the same page securely; accept the radio\'s certificate once (Advanced → continue).';
@@ -2802,10 +2813,9 @@ if (MESH_ONLY) {
     webUrl = eudUrl(j.server || window.TAKWEB_SERVER || store.get('eud.webUrl', '') || '');
     // the TAKweb server relays to any TAK server it allows: other servers can be added here, like on the normal page
     try { if (webUrl && !RELAY) RELAY = new URL(webUrl).origin; } catch (e) { /* invalid */ }
-    if (RELAY) document.body.classList.add('radio-relay');
+    if (RELAY) radioRelayOn();
     return webUrl;
   };
-  const goOnline = async () => { const u = await serverUrl(); if (u) location.href = radioLink(invite || u); };
   // server button: the known server with one tap, typing only when there is none (or for another server)
   async function showServer(manual) {
     const u = await serverUrl();
@@ -2818,14 +2828,19 @@ if (MESH_ONLY) {
   }
   showServer(false);
   document.addEventListener('eud-popup', e => { if (e.detail === 'server') showServer(false); });
-  $('srvKnownGo').addEventListener('click', goOnline);
   $('srvChange').addEventListener('click', () => showServer(true));
   $('srvWebGo').addEventListener('click', () => {
     let u = $('srvWeb').value.trim();
     if (!u) return $('srvWeb').focus();
     u = eudUrl(u);
     store.set('eud.webUrl', u);
-    location.href = radioLink(u);
+    // used right here: TAK servers, video, data packages … go through it (no page change)
+    try { RELAY = new URL(u).origin; } catch (e) { return toast('Not a valid address.'); }
+    webUrl = u;
+    radioRelayOn();
+    showServer(false);
+    checkOnline();
+    toast('TAKweb server set: ' + new URL(u).host);
   });
   // the radio's own TAK user: this page logs in to the TAK server itself (certificate, connection) – no page change.
   // One login per radio: all radios answer as takweb.local (one origin for the browser), so the login is kept per
@@ -2895,16 +2910,10 @@ if (MESH_ONLY) {
     let ok = false;
     try { await fetch(new URL('icon-192.png?ping=' + Date.now(), u), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); ok = true; } catch (e) { /* offline */ }
     clearTimeout(t);
-    if (ok && invite) radioJoin().catch(() => {}); // logged in right here – no bar (full TAKweb: server button)
-    $('onlineBar').classList.toggle('hidden', !ok || closed || !!invite);
-    radioOnline = ok && !closed;
-    updatePermBar();
+    if (ok && invite) radioJoin().catch(() => {}); // the radio's TAK user logs in right here
   }
   setTimeout(checkOnline, 2500);
   setInterval(checkOnline, 20000);
-  // with the radio's TAK user: the invitation logs in by itself (certificate request on the server's page)
-  $('onlineGo').addEventListener('click', goOnline);
-  $('onlineClose').addEventListener('click', () => { closed = true; $('onlineBar').classList.add('hidden'); });
 }
 updatePermBar();
 // app: should the WebView still want the compass allowed, quietly with the first tap (no bar)

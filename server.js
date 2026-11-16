@@ -1905,6 +1905,10 @@ async function handle(req, res) {
     if (p.startsWith('/join/')) return serveStatic(res, 'join', decodeURIComponent(p.slice(6)));
     if (p.startsWith('/access/')) return serveStatic(res, 'access', decodeURIComponent(p.slice(8)));
     if (p === '/eud') return send(res, 302, '', 'text/plain', { Location: '/eud/' });
+    if (p.startsWith('/eud/')) { // a radio's page loads what is not on its flash from here (QR scanner, 3D map, elevation)
+      const ro = radioOrigin(req.headers.origin);
+      if (ro) { res.setHeader('Access-Control-Allow-Origin', ro); res.setHeader('Vary', 'Origin'); }
+    }
     if (p.startsWith('/eud/vendor/')) return serveVendor(res, p.slice(12));
     if (p === '/eud/tiles/sources.json') return json(res, 200, { sources: TileCache.list() });
     if (p.startsWith('/eud/tiles/')) return await serveTile(res, p.slice(11));

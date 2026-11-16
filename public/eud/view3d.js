@@ -5,7 +5,9 @@
 'use strict';
 
 (() => {
-  const DEM = location.origin + TILE_BASE + 'dem/{z}/{x}/{y}.png'; // do not encode the braces (new URL would)
+  // where this script came from: the TAKweb server (also when a radio's page loads it from there)
+  const HOME = new URL('.', (document.currentScript && document.currentScript.src) || location.href);
+  const DEM = HOME.origin + new URL('tiles/', HOME).pathname + 'dem/{z}/{x}/{y}.png'; // do not encode the braces (new URL would)
   const EMPTY = { type: 'FeatureCollection', features: [] };
   const supported = (() => {
     try { return !!document.createElement('canvas').getContext('webgl2'); } catch (e) { return false; }
@@ -25,7 +27,7 @@
   let images = [];         // ids of raster images from overlays
   let demErrors = 0;       // failed elevation tiles
 
-  const absUrl = t => (/^https?:\/\//i.test(t) ? t : location.origin + t);
+  const absUrl = t => (/^https?:\/\//i.test(t) ? t : HOME.origin + t);
   const mlZoom = () => map.getZoom() - 1; // Leaflet works with 256 px tiles, MapLibre with 512
   const leafletBearing = () => (map.getBearing ? map.getBearing() : 0);
 
@@ -66,12 +68,12 @@
     if (ml) return;
     if (!loading) {
       loading = (async () => {
-        const mod = await import('./vendor/maplibre-gl.mjs');
+        const mod = await import(new URL('vendor/maplibre-gl.mjs', HOME).href);
         lib = mod.default && mod.default.Map ? mod.default : mod;
         if (!document.querySelector('link[data-ml]')) {
           const css = document.createElement('link');
           css.rel = 'stylesheet';
-          css.href = 'vendor/maplibre-gl.css';
+          css.href = new URL('vendor/maplibre-gl.css', HOME).href;
           css.dataset.ml = '1';
           document.head.append(css);
         }
