@@ -89,6 +89,28 @@ test('meshsite: TAKweb for the radio – flat names, gzipped, mesh-only flag, no
   assert.match(idx, /9\.9\.9/);
 });
 
+test('meshsite lite (radios without PSRAM): one page with everything for the basic functions, the rest from the server', () => {
+  const b = meshsite.build('9.9.9', 'https://tak.example.org/eud/', 'full', true);
+  assert.deepEqual(b.files.map(f => f.name), ['index.html', 'worldmap.json']);
+  assert.equal(b.map, 'small', 'always the small world map');
+  assert.ok(b.total < 300 * 1024, `small: ${b.total}`);
+  const idx = zlib.gunzipSync(b.files[0].gz).toString();
+  // no further file is requested at the start: no external scripts, stylesheets or images
+  assert.doesNotMatch(idx, /<script src=|<link rel="(stylesheet|icon|apple-touch-icon)"|src="[\w-]+\.png"/);
+  assert.match(idx, /window\.TAKWEB_MESH = true; window\.TAKWEB_LITE = \["milsymbol\.js","video\.js","data\.js","codec2\.js","voice\.js"\]/);
+  assert.match(idx, /window\.TAKWEB_SERVER = "https:\/\/tak\.example\.org\/eud\/"/);
+  for (const marker of ['L.Map', 'window.eudMeshReady = true', 'window.meshProto', 'eudToolsApi', '.leaflet-container']) assert.ok(idx.includes(marker), marker);
+  assert.ok(!idx.includes('ms.Symbol = function') && !/MilSymbol|milsymbol\.js"\)/.test(idx.replace(/TAKWEB_LITE = \[[^\]]*\]/, '')), 'milsymbol not inlined');
+  // inline code cannot end the script element early
+  const scripts = idx.split('<script>').slice(1).map(x => x.split('</script>')[0]);
+  assert.ok(scripts.length >= 7, 'inlined scripts');
+  assert.ok(scripts.every(x => !/<!--/.test(x)), 'no <!-- in inline scripts');
+  // the radio page of the other radios is unchanged
+  assert.ok(meshsite.build('9.9.9').files.length > 10);
+  assert.ok(meshsite.LITE_TARGET.test('heltec-wireless-tracker') && meshsite.LITE_TARGET.test('heltec-wireless-tracker-V1-0'));
+  assert.ok(!meshsite.LITE_TARGET.test('seeed-xiao-s3') && !meshsite.LITE_TARGET.test('heltec-v3'));
+});
+
 test('installer: removes the old web files, writes TAKweb, checks the sizes, sets the WLAN, restarts', async () => {
   const radio = new FakeRadio({ files: { '/static/index.html.gz': 'old', '/static/assets/x.js.gz': 'x'.repeat(5000), '/prefs/config.proto': 'cfg' } });
   const inst = connect(radio);

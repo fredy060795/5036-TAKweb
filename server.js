@@ -1215,12 +1215,12 @@ async function handleEudApi(req, res, route) {
   }
   // TAKweb for the flash of a Meshtastic radio (lib/meshsite.js, public/eud/meshinstall.js): list and files (gzipped)
   if (route === 'meshsite' && req.method === 'GET') {
-    const b = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map'));
+    const b = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map'), new URL(req.url, 'http://x').searchParams.get('lite') === '1');
     return json(res, 200, { version: b.version, total: b.total, server: publicBase(req) + '/eud/', files: b.files.map(f => ({ name: f.name, size: f.size, gz: f.gz.length })) });
   }
   // the same as one ZIP (<name>.gz files) – for the Meshtastic desktop flasher, offline
   if (route === 'meshsite.zip' && req.method === 'GET') {
-    const b = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map'));
+    const b = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map'), new URL(req.url, 'http://x').searchParams.get('lite') === '1');
     const entries = Object.fromEntries(b.files.map(f => [f.name + '.gz', f.gz]));
     entries['takweb-mesh.json'] = JSON.stringify({ version: b.version, files: b.files.map(f => f.name) });
     const z = zip(entries);
@@ -1229,7 +1229,7 @@ async function handleEudApi(req, res, route) {
   }
   const msf = /^meshsite\/([\w.-]+)$/.exec(route);
   if (msf && req.method === 'GET') {
-    const f = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map')).files.find(x => x.name === msf[1]);
+    const f = meshsite.build(VERSION, publicBase(req) + '/eud/', new URL(req.url, 'http://x').searchParams.get('map'), new URL(req.url, 'http://x').searchParams.get('lite') === '1').files.find(x => x.name === msf[1]);
     if (!f) return json(res, 404, { error: 'Not found' });
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': f.gz.length, 'Cache-Control': 'no-cache' });
     return res.end(f.gz);
@@ -1539,7 +1539,8 @@ async function handleAdminApi(req, res, route) {
     const server = publicBase(req) + '/eud/';
     try {
       const img = await meshsite.radioImage(fs.readFileSync(file), {
-        site: meshsite.build(VERSION, server, body.map === 'full' ? 'full' : 'small'), server,
+        // lite: the one-file page for radios without PSRAM (Heltec Wireless Tracker) – lib/meshsite.js
+        site: meshsite.build(VERSION, server, body.map === 'full' ? 'full' : 'small', !!body.lite), server,
         invite: typeof body.invite === 'string' ? body.invite.slice(0, 2000) : '',
         ap: body.ap ? { ssid: String(body.ap.ssid || '').slice(0, 32), psk: String(body.ap.psk || '').slice(0, 63) } : null,
         setup: radioSetup(body.setup),
