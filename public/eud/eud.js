@@ -1408,7 +1408,7 @@ function drawMe() {
   if (!meMarker) {
     meCircle = L.circle(ll, { radius: me.acc || 0, color: '#007bff', weight: 1, fillOpacity: 0.08, interactive: false }).addTo(map);
     meMarker = L.marker(ll, { icon, zIndexOffset: 1000 }).addTo(map).bindPopup(() =>
-      `<div class="t">${esc(profile.callsign || 'Me')}</div><div>${me.lat.toFixed(5)}, ${me.lon.toFixed(5)}</div><div class="k">± ${Math.round(me.acc)} m</div>`);
+      `<div class="t">${esc(profile.callsign || 'Me')}</div><div>${me.lat.toFixed(5)}, ${me.lon.toFixed(5)}</div><div class="k">${me.manual ? 'set by hand (no GPS fix)' : '± ' + Math.round(me.acc) + ' m'}</div>`);
     map.setView(ll, Math.max(map.getZoom(), 15));
   } else {
     meMarker.setLatLng(ll).setIcon(icon);
@@ -1451,7 +1451,9 @@ function onPosition(c, t) {
   if (Date.now() - lastSent > 30000 || (moved > 10 && Date.now() - lastSent > 3000)) sendSelf();
 }
 function startGeo() {
-  if (LITE) return; // plain http on a weak radio: the browser gives no position – the radio's GPS does (eudRadioPosition)
+  // plain http on a weak radio: the browser gives no position – the radio's GPS does (eudRadioPosition); with the
+  // Chrome setting "insecure origins treated as secure" the page counts as secure and the phone's GPS works too
+  if (LITE && !window.isSecureContext) return;
   if (bgGeo) {
     if (geoWatch != null) return;
     geoWatch = 'bg';
@@ -1474,10 +1476,38 @@ startGeo();
 setInterval(() => { if (Date.now() - lastSent > 30000) sendSelf(); }, 10000);
 
 map.on('dragstart', () => { follow = false; $('btnLocate').classList.remove('active'); });
+// weak radio without GPS fix (plain http: no position from the browser): set the own position by hand on the map –
+// sent like a GPS position (TAK position over mesh and server) until the radio's GPS has a fix
+let pickMe = false;
+function askPickMe() {
+  pickMe = true;
+  // Android Chrome can give the phone's own position on this http page with a one-time setting
+  const tip = /Android/.test(navigator.userAgent) && !store.get('eud.geoTip', false)
+    ? ' Tip (Android/Chrome): chrome://flags → "Insecure origins treated as secure" → add ' + location.origin + ' → Relaunch: then the phone\'s GPS works here too.' : '';
+  if (tip) store.set('eud.geoTip', true);
+  toast('No GPS fix yet – tap the map where you are (long press later to move it).' + tip, tip ? 15000 : 6000);
+}
+function setManualPos(ll) {
+  pickMe = false;
+  me = { lat: ll.lat, lon: ll.lng, alt: null, acc: 30, speed: null, course: null, t: Date.now(), manual: true };
+  store.set('eud.manualPos', { lat: me.lat, lon: me.lon, at: Date.now() });
+  drawMe();
+  sendSelf();
+  toast('Position set by hand – sent like GPS until the radio has a GPS fix.', 5000);
+}
+if (LITE) {
+  const mp = store.get('eud.manualPos', null);
+  if (mp && Date.now() - mp.at < 24 * 3600 * 1000) setTimeout(() => { if (!me) { me = { lat: mp.lat, lon: mp.lon, alt: null, acc: 30, t: Date.now(), manual: true }; drawMe(); } }, 1500);
+  map.on('contextmenu', e => {
+    if (me && !me.manual) return; // GPS works: nothing to set
+    if (confirm('Set my position here? (no GPS fix)')) setManualPos(e.latlng);
+  });
+}
 $('btnLocate').addEventListener('click', () => {
   follow = true;
   $('btnLocate').classList.add('active');
   if (me) map.setView([me.lat, me.lon], Math.max(map.getZoom(), 16));
+  else if (LITE) askPickMe();
   else toast('No position yet.');
 });
 $('btnLocate').classList.add('active');
@@ -2581,6 +2611,7 @@ function drawCorridor() {
   ]).addTo(map);
 }
 map.on('click', e => {
+  if (pickMe) return setManualPos(e.latlng); // own position by hand (weak radio without GPS fix)
   if (movingUid) return moveTo(e.latlng.lat, e.latlng.lng); // MOVE: tap = new position
   if (window.eudMapTap && window.eudMapTap(e.latlng)) return; // drawing shapes, picking a Bloodhound target (tools.js)
   if (tool) return placeMarker(e.latlng); // symbol selected: a tap places the marker (like ATAK)
@@ -2787,6 +2818,7 @@ const insecureRadio = () => MESH_ONLY && !LITE && !window.isSecureContext && loc
 // weak radio: the radio's own GPS position is this device's position (mesh.js)
 window.eudRadioPosition = pos => {
   if (!LITE || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return;
+  if (me && me.manual) { store.del('eud.manualPos'); toast('GPS fix – the position now comes from the radio.'); }
   onPosition({ latitude: pos.lat, longitude: pos.lon, altitude: pos.alt, accuracy: null, speed: pos.speed, heading: pos.course }, pos.time ? pos.time * 1000 : Date.now());
 };
 function updatePermBar() {
@@ -2832,6 +2864,30 @@ $('permClose').addEventListener('click', () => $('permBar').classList.add('hidde
 // on the radio: is the TAKweb server reachable (the phone's mobile data)? Then offer TAKweb online
 if (MESH_ONLY) {
   let webUrl = '', invite = '', closed = false, onRadio = null;
+  // weak radio (lite page): a visible line how far the connection to the TAK server got – the radio's log cannot show it
+  // (the phone talks to the TAKweb server over its own internet)
+  let netStep = 'Server: starting …';
+  const netSay = t => { netStep = t; showNet(); };
+  function showNet() {
+    if (!LITE) return;
+    let el = document.getElementById('radioNet');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'radioNet';
+      el.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:1200;max-width:70vw;padding:3px 8px;border-radius:6px;'
+        + 'font:12px/1.3 sans-serif;background:rgba(0,0,0,.72);color:#fff;pointer-events:none';
+      document.body.append(el);
+    }
+    const srv = servers.find(x => x.radioKey) || servers.find(x => x.relay);
+    const c = srv ? connOf(srv) : null;
+    let t = netStep;
+    if (c && c.state === 'connected') t = 'TAK server: connected (' + srv.host + ')';
+    else if (c && c.state === 'connecting') t = 'TAK server: connecting to ' + srv.host + ' …';
+    else if (c && c.message) t = 'TAK server (' + c.state + '): ' + c.message;
+    el.textContent = t;
+    el.style.background = c && c.state === 'connected' ? 'rgba(20,110,40,.85)' : 'rgba(0,0,0,.72)';
+  }
+  if (LITE) setInterval(showNet, 2000);
   // set up in the admin: takweb-server.json on the radio holds the server and (optionally) this radio's TAK user.
   // That server comes first; an address the user typed only when the radio has none.
   const radioFile = () => onRadio || (onRadio = fetch('takweb-server.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : {})).catch(() => ({})));
@@ -2901,6 +2957,7 @@ if (MESH_ONLY) {
     let srv = servers.find(s => s.radioKey === key && s.certPem);
     if (!srv) {
       joining = true;
+      netSay('TAK server: logging in as ' + cfg.username + ' …');
       try {
         srv = newServer({ name: new URL(u).host, host: cfg.host, port: cfg.port || 8089, proto: 'ssl', enrollPort: cfg.enrollPort || 8446, username: cfg.username, radioKey: key, relay });
         for (let i = 0; i < 2; i++) {
@@ -2920,6 +2977,7 @@ if (MESH_ONLY) {
         saveServers();
       } catch (e) {
         toast('TAK server: ' + e.message, 5000);
+        netSay('TAK server login failed: ' + e.message);
         return;
       } finally { joining = false; }
     }
@@ -2934,11 +2992,15 @@ if (MESH_ONLY) {
   }
   async function checkOnline() {
     const u = await serverUrl();
-    if (!u || closed) return;
+    if (!u) return netSay('No TAKweb server set on this radio (admin → flash the radio again).');
+    if (closed) return;
     const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 6000);
     let ok = false;
     try { await fetch(new URL('icon-192.png?ping=' + Date.now(), u), { mode: 'no-cors', cache: 'no-store', signal: ctl.signal }); ok = true; } catch (e) { /* offline */ }
     clearTimeout(t);
+    if (!ok) netSay('No internet to ' + new URL(u).host + ' – phone: allow mobile data while on this WLAN.');
+    else if (!invite) netSay('TAKweb server reachable – no TAK user set for this radio (admin).');
+    else if (netStep.startsWith('No internet') || netStep.startsWith('Server: starting')) netSay('TAKweb server reachable (' + new URL(u).host + ').');
     if (ok && invite) radioJoin().catch(() => {}); // the radio's TAK user logs in right here
   }
   setTimeout(checkOnline, 2500);

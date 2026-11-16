@@ -303,6 +303,14 @@
     try { j = await fetch('takweb-server.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : {})); } catch (e) { return; }
     const r = P.setupPackets(myNode, j.setup, { channels, loraRaw, region, positionRaw, mqtt: mqttCfg, networkRaw });
     if (!r.packets.length) return;
+    // never a restart loop: the same setup is tried at most twice in 15 minutes (a radio that does not keep a value
+    // would otherwise restart at every page start)
+    const sig = myNode + ':' + r.what.join(',');
+    let tries = {};
+    try { tries = JSON.parse(localStorage.getItem('eud.radioSetupTry') || '{}'); } catch (e) { /* private mode */ }
+    if (tries.sig === sig && tries.n >= 2 && Date.now() - tries.at < 15 * 60000) return;
+    tries = { sig, n: tries.sig === sig && Date.now() - tries.at < 15 * 60000 ? tries.n + 1 : 1, at: Date.now() };
+    try { localStorage.setItem('eud.radioSetupTry', JSON.stringify(tries)); } catch (e) { /* private mode */ }
     toast('Setting up this radio as chosen in the admin: ' + r.what.join(', ') + ' – it restarts.', 8000);
     for (const pkt of r.packets) { await write(pkt); await new Promise(res => setTimeout(res, 400)); }
     await new Promise(res => setTimeout(res, 800));
