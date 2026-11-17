@@ -703,15 +703,11 @@
 
   async function bridgeUp(xml, k, direct = false) {
     if (!cfg.bridge || xml.includes('<' + MARK) || !live(xml)) return; // came from the server through another gateway / old
-    // plain Meshtastic radios go to the TAK server too: the mesh only has its own channels, so everyone sees everyone –
-    // except radios heard on a public channel (default key "AQ==" or none): strangers must not land on every ATAK
+    // plain Meshtastic radios go to the TAK server too, like ATAK does: everyone sees everyone (the server spreads them);
+    // the own radios send only on the encrypted channel anyway
     const plain = k.type === 'a-f-G-E-S' || k.uid.startsWith('MESH-');
     const pm = plain && /^MESH-!([0-9a-f]{8})$/.exec(k.uid);
     const hn = pm ? nodes.get(parseInt(pm[1], 16)) : null;
-    if (plain) {
-      const ch = channels.find(c => c.index === ((hn && hn.channel) || 0));
-      if (ch && (ch.key === 'default' || ch.key === 'none')) return;
-    }
     if (k.type === 'b-t-f' && !direct && !xml.includes('.' + P.ALL_CHAT + '.')) return; // direct message to us: not for the server
     if (pendingUp.has(k.key)) return;
     pendingUp.add(k.key);
