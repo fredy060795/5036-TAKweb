@@ -2815,6 +2815,79 @@ let permAsked = false;
 // on the radio's own WLAN the page may come over http (captive portal, http://takweb/): the browser then gives no
 // position, compass or microphone – offer the same page over https (the radio's self-signed certificate, once)
 const insecureRadio = () => MESH_ONLY && !LITE && !window.isSecureContext && location.protocol === 'http:';
+// ======================================================================
+// Update the TAKweb page on the radio over the internet (settings): the phone loads the current page of the TAKweb
+// server (its mobile data) and writes it onto the radio over the radio's WLAN – Meshtastic's file upload (/upload →
+// /static/<name>). Files first, index.html last (until then the old page stays usable); the radio's own files (server
+// address, TAK user, setup: takweb-server.json) stay.
+// ======================================================================
+if (MESH_ONLY) {
+  $('radioUpd').classList.remove('hidden');
+  const curVer = (($('tsbName').querySelector('.ver') || {}).textContent || '').replace(/^v/, '');
+  let plan = null, running = false;
+  const ruSay = t => { $('ruText').textContent = t; };
+  async function radioFiles() {
+    try { return ((await (await fetch('/json/fs/browse/static', { cache: 'no-store' })).json()).data || {}).files || []; } catch (e) { return null; }
+  }
+  async function ruCheck() {
+    if (running) return;
+    $('ruGo').disabled = true;
+    if (!RELAY) return ruSay('Needs the TAKweb server (internet) – set it under the server button first.');
+    // which build: the one-file page of a weak radio, or the full one (with the detailed world map if the radio has it)
+    let q = LITE ? '?lite=1' : '';
+    if (!LITE) {
+      const files = await radioFiles();
+      const wm = (files || []).find(f => /worldmap\.json\.gz$/.test(f.name || ''));
+      if (wm && wm.size > 150000) q = '?map=full';
+    }
+    let want;
+    try { want = await (await fetch(relayUrl('/api/eud/meshsite' + q), { cache: 'no-store' })).json(); } catch (e) { return ruSay('TAKweb server not reachable – the phone needs internet (mobile data).'); }
+    if (!want || !Array.isArray(want.files) || !want.files.length) return ruSay('The TAKweb server sent no page.');
+    plan = { q, want };
+    $('ruGo').disabled = false;
+    ruSay(want.version === curVer ? `Current (v${curVer}). You can write it again if the page misbehaves.`
+      : `On the radio: v${curVer || '?'} – on the server: v${want.version} (${Math.round(want.total / 1024)} KB). Stay in this WLAN while it updates.`);
+  }
+  $('ruGo').addEventListener('click', async () => {
+    if (!plan || running) return;
+    if (!confirm('Write the TAKweb page v' + plan.want.version + ' onto this radio? The page reloads afterwards.')) return;
+    running = true;
+    $('ruGo').disabled = true;
+    $('ruBar').classList.remove('hidden');
+    const list = plan.want.files.slice().sort((a, b) => (a.name === 'index.html') - (b.name === 'index.html'));
+    const total = list.reduce((n, f) => n + f.gz, 0);
+    let done = 0;
+    try {
+      for (const f of list) {
+        ruSay(`Loading and writing ${f.name} …`);
+        const r = await fetch(relayUrl('/api/eud/meshsite/' + encodeURIComponent(f.name) + plan.q), { cache: 'no-store' });
+        if (!r.ok) throw new Error(f.name + ': server ' + r.status);
+        const data = await r.arrayBuffer();
+        if (data.byteLength !== f.gz) throw new Error(f.name + ': incomplete download');
+        const fd = new FormData();
+        fd.append('file', new Blob([data], { type: 'application/octet-stream' }), f.name + '.gz');
+        const u = await fetch('/upload', { method: 'POST', body: fd });
+        if (!u.ok) throw new Error(f.name + ': the radio answered ' + u.status);
+        done += f.gz;
+        $('ruFill').style.width = Math.round(done * 100 / total) + '%';
+      }
+      // check what the radio has now
+      const files = await radioFiles();
+      if (files) {
+        const bad = list.filter(f => !files.some(x => (x.name || '').endsWith('/' + f.name + '.gz') && x.size === f.gz));
+        if (bad.length) throw new Error('not complete on the radio: ' + bad.map(f => f.name).join(', '));
+      }
+      ruSay('Done – the page restarts with v' + plan.want.version + ' …');
+      setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+      ruSay('Update stopped: ' + e.message + ' – try again (the old page stays as long as index.html was not written).');
+      running = false;
+      $('ruGo').disabled = false;
+    }
+  });
+  document.addEventListener('eud-popup', e => { if (e.detail === 'me') ruCheck().catch(() => {}); });
+}
+
 // weak radio: the radio's own GPS position is this device's position (mesh.js)
 window.eudRadioPosition = pos => {
   if (!LITE || !pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return;
