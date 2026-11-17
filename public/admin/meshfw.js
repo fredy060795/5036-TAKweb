@@ -293,11 +293,14 @@ function fillSetup() {
 }
 $('suDev').addEventListener('change', () => { try { localStorage.setItem('takweb.suDev', $('suDev').value); } catch (e) { /* none */ } });
 
+let setupChans = []; // mesh channels of the TAK server (OTS / WebTAK server)
 async function loadSetupChannels() {
   const sel = $('suChan'), keep = sel.value;
   let chans = [];
   try { chans = ((await api('ots/mesh')).channels || []).filter(c => c.url); } catch (e) { /* no OTS */ }
-  sel.replaceChildren(...chans.map(c => new Option(`${c.name || '(no name)'}${c.modem_preset ? ' · ' + c.modem_preset : ''}`, c.url)),
+  setupChans = chans;
+  sel.replaceChildren(...(chans.length > 1 ? [new Option(`all ${chans.length} channels of the server (${chans[0].name || 'first'} primary)`, '*')] : []),
+    ...chans.map(c => new Option(`${c.name || '(no name)'}${c.modem_preset ? ' · ' + c.modem_preset : ''}`, c.url)),
     new Option('public default channel (LongFast)', ''));
   if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
 }
@@ -554,7 +557,8 @@ async function radioLogin(job) {
     const m = await api('mesh-mqtt/login', { method: 'POST', body: {} });
     mqtt = { address: m.address, username: m.username, password: m.password, root: m.root, tls: m.tls };
   }
-  const setup = { channel: job.chan || '', gpsSecs: job.gateway ? 900 : 120, mqtt, gateway: job.gateway };
+  // field radios: Meshtastic role TAK (made for TAK/ATAK); the HQ gateway stays CLIENT (passes everything on)
+  const setup = { channel: job.chan || '', gpsSecs: job.gateway ? 900 : 120, role: job.gateway ? 'client' : 'tak', mqtt, gateway: job.gateway };
   job.login = { server, invite, who, mqtt, setup };
   return job.login;
 }
@@ -569,7 +573,7 @@ function doneText(job, ssid) {
   const name = ssid || job.ap.ssid || 'TAKweb-xxxx';
   return `Done! ${radioName(job.d)} has TAKweb${who ? ' and the TAK user ' + who.callsign : ''}. Phone: WLAN "${name}"`
     + `${job.ap.psk ? ` (password ${job.ap.psk})` : ' (open)'} → ${openText(job.d)}.`
-    + (job.chan || job.wantMqtt || job.gateway ? ' Opening the page sets the radio up as chosen here (channel, GPS' + (job.wantMqtt ? ', MQTT' : '') + (job.gateway ? ', internet WLAN' : '') + ') – it restarts once.' : '')
+    + (job.chan || job.wantMqtt || job.gateway ? ' Opening the page sets the radio up as chosen here (channel, role ' + (job.gateway ? 'CLIENT' : 'TAK') + ', full power, GPS' + (job.wantMqtt ? ', MQTT' : '') + (job.gateway ? ', internet WLAN' : '') + ') – it restarts once.' : '')
     + (who ? ' With internet it logs in to the TAK server by itself.' : '');
 }
 
@@ -680,7 +684,8 @@ $('suGo').addEventListener('click', async () => {
   try { port = await navigator.serial.requestPort(); } catch (e) { return; } // list closed
   const info = port.getInfo();
   const job = {
-    d, chan: $('suChan').value, user: $('suUser').value, wantMqtt: $('suMqtt').checked && !$('suMqtt').disabled, mqttAddr: $('suMqttAddr').value.trim(),
+    // "all channels of the server": one link with all of them (the first one primary, at most 8)
+    d, chan: $('suChan').value === '*' ? P.mergeChannelUrls(setupChans.map(c => c.url)) : $('suChan').value, user: $('suUser').value, wantMqtt: $('suMqtt').checked && !$('suMqtt').disabled, mqttAddr: $('suMqttAddr').value.trim(),
     ap: { ssid: $('suSsid').value.trim(), psk: $('suPsk').value },
     gateway: $('suRole').value === 'gateway' ? { ssid: $('suGwSsid').value.trim(), psk: $('suGwPsk').value } : null,
     appInfo: info.usbVendorId === ESPRESSIF ? null : info, // chosen already in boot mode: Meshtastic comes as another device

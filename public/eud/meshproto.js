@@ -205,7 +205,8 @@
       // LoRaConfig.region (7): 0 = UNSET – then the radio neither sends nor receives
       const lc = lora ? decode(lora) : null;
       const position = has(cf, 2) ? (bytes(cf, 2) || new Uint8Array(0)) : null;
-      return { kind: 'config', network: bytes(cf, 4), lora, position, region: lc ? u32(lc, 7) : undefined, preset: lc ? u32(lc, 2) : undefined, usePreset: lc ? !!u32(lc, 1) : undefined };
+      const device = has(cf, 1) ? (bytes(cf, 1) || new Uint8Array(0)) : null;
+      return { kind: 'config', network: bytes(cf, 4), lora, position, device, region: lc ? u32(lc, 7) : undefined, preset: lc ? u32(lc, 2) : undefined, usePreset: lc ? !!u32(lc, 1) : undefined };
     }
     return { kind: 'other' };
   }
@@ -334,12 +335,43 @@
     adminPacket(node, new Writer().msg(33, new Writer().int(1, index).bytes(2, settingsRaw, true).uint(3, role)));
   // the LoRa settings of a link; a link without region keeps the radio's region. TAKweb radios are crisis radios:
   // override_duty_cycle (12) always on – they send whatever the channel load
+  // Full transmit power: tx_power (10) = 30 dBm like the maximum in the Meshtastic app (the firmware limits it to what
+  // the region allows and the chip can, e.g. 27 dBm EU_868 / 22 dBm SX1262), sx126x_rx_boosted_gain (13) on
+  const TX_POWER_MAX = 30;
   function adminSetLora(node, loraRaw, keepRegion) {
     const lf = decode(loraRaw || new Uint8Array(0));
     // config_ok_to_mqtt (105): the radio's packets may go to the server (MQTT gateway)
-    const lora = withoutFields(loraRaw, u32(lf, 7) ? [12, 105] : [7, 12, 105]).bool(12, true).bool(105, true);
+    const lora = withoutFields(loraRaw, u32(lf, 7) ? [10, 12, 13, 105] : [7, 10, 12, 13, 105]).int(10, TX_POWER_MAX).bool(12, true).bool(13, true).bool(105, true);
     if (!u32(lf, 7) && keepRegion) lora.uint(7, keepRegion);
     return adminPacket(node, new Writer().msg(34, new Writer().msg(6, lora)));
+  }
+  // Meshtastic device role (Config.device.role 1): CLIENT 0, TAK 7 (made for ATAK/TAK: less routine traffic in the
+  // mesh, TAK positions and chat), TAK_TRACKER 10
+  const DEVICE_ROLES = { client: 0, tak: 7, tak_tracker: 10 };
+  function adminSetDevice(node, deviceRaw, role) {
+    const dev = withoutFields(deviceRaw, [1]);
+    if (role) dev.uint(1, role);
+    return adminPacket(node, new Writer().msg(34, new Writer().msg(1, dev)));
+  }
+  // several channel links (e.g. all mesh channels of the server) as one: the first one's channel is the primary and
+  // its LoRa settings count, the others' channels follow as secondary channels (at most 8)
+  function mergeChannelUrls(urls) {
+    const list = (urls || []).filter(Boolean);
+    if (!list.length) return '';
+    const parts = list.map(u => parseChannelUrl(u));
+    const seen = new Set(), settings = [];
+    for (const p of parts) for (let i = 0; i < p.settings.length; i++) {
+      const key = p.names[i] + ':' + Array.from(p.settings[i]).join(',');
+      if (seen.has(key) || settings.length >= 8) continue;
+      seen.add(key);
+      settings.push(p.settings[i]);
+    }
+    const w = new Writer();
+    for (const st of settings) w.bytes(1, st, true);
+    if (parts[0].lora) w.bytes(2, parts[0].lora, true);
+    const bin = w.done();
+    let b64 = btoa(String.fromCharCode(...bin)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return 'https://meshtastic.org/e/#' + b64;
   }
   // all packets to put a channel link onto the radio (primary + secondary channels, the rest off, LoRa settings)
   function applyChannelUrl(node, url, { region = 0, max = 8 } = {}) {
@@ -360,8 +392,9 @@
     if (setup.channel) {
       try {
         const c = parseChannelUrl(setup.channel);
-        const prim = (radio.channels || []).find(x => x.role === 1);
-        if (!prim || prim.name !== c.names[0] || !radio.region) {
+        // all channels of the link, in order (primary first) – a missing or other secondary channel counts too
+        const have = (radio.channels || []).filter(x => x.role).sort((a, b) => a.index - b.index).map(x => x.name || '');
+        if (have.join('|') !== c.names.map(n => n || '').join('|') || !radio.region) {
           out.push(...applyChannelUrl(node, setup.channel, { region: radio.region > 0 ? radio.region : REGIONS.EU_868 }).packets);
           what.push('channel ' + c.names.filter(Boolean).join(', '));
           chanDone = true;
@@ -369,9 +402,15 @@
       } catch (e) { /* not a link */ }
     }
     const lf = decode(radio.loraRaw || new Uint8Array(0));
-    if (!chanDone && radio.loraRaw && (!u32(lf, 12) || !u32(lf, 105))) {
+    if (!chanDone && radio.loraRaw && (!u32(lf, 12) || !u32(lf, 105) || u32(lf, 10) !== TX_POWER_MAX || !u32(lf, 13))) {
       out.push(adminSetLora(node, radio.loraRaw, radio.region > 0 ? radio.region : REGIONS.EU_868));
-      what.push('always send');
+      what.push('full power, always send');
+    }
+    if (setup.role && DEVICE_ROLES[setup.role] !== undefined && radio.deviceRaw) {
+      if (u32(decode(radio.deviceRaw), 1) !== DEVICE_ROLES[setup.role]) {
+        out.push(adminSetDevice(node, radio.deviceRaw, DEVICE_ROLES[setup.role]));
+        what.push('role ' + setup.role.toUpperCase());
+      }
     }
     if (setup.gpsSecs) {
       const pf = decode(radio.positionRaw || new Uint8Array(0));
@@ -675,7 +714,7 @@
 
   return {
     XMODEM, crc16, sha256, toRadioXmodem, adminSetWifi, adminReboot, adminSetRegion, REGIONS, PRESETS,
-    parseChannelUrl, adminSetChannel, adminSetLora, applyChannelUrl, adminSetMqtt, setupPackets, adminSetPosition, withoutFields, IPHONE_IP, ipU32, staticNet,
+    parseChannelUrl, adminSetChannel, adminSetLora, applyChannelUrl, adminSetDevice, mergeChannelUrls, DEVICE_ROLES, adminSetMqtt, setupPackets, adminSetPosition, withoutFields, IPHONE_IP, ipU32, staticNet,
     voicePackets, voiceRequest, parseVoice, VoiceAssembler, VOICE_CHUNK,
     PORT, BROADCAST, ALL_CHAT, TEAMS, ROLES, FOUNTAIN, Writer, decode,
     wantConfig, toRadioPacket, takPli, takChat, parseTak, parseFromRadio, parseUserPayload, parsePositionPayload,

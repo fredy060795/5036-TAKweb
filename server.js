@@ -1527,6 +1527,7 @@ async function handleAdminApi(req, res, route) {
     const out = {};
     if (x.channel && /^https:\/\/meshtastic\.org\/e\//.test(String(x.channel))) out.channel = t(x.channel, 1500);
     if (Number(x.gpsSecs) > 0) out.gpsSecs = Math.min(86400, Math.round(Number(x.gpsSecs)));
+    if (['tak', 'client', 'tak_tracker'].includes(x.role)) out.role = x.role; // Meshtastic device role
     if (x.mqtt && x.mqtt.address) out.mqtt = { address: t(x.mqtt.address, 120), username: t(x.mqtt.username, 64), password: t(x.mqtt.password, 64), root: t(x.mqtt.root || 'opentakserver', 64), tls: x.mqtt.tls !== false };
     if (x.gateway && x.gateway.ssid) out.gateway = { ssid: t(x.gateway.ssid, 32), psk: t(x.gateway.psk, 63) };
     return Object.keys(out).length ? out : null;
