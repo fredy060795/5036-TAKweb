@@ -44,7 +44,7 @@
   let message = '';
   let myNode = 0, nonce = 0;
   let networkRaw = null; // the radio's network settings (WLAN)
-  let positionRaw = null, mqttCfg = null, setupChecked = false; // for the setup the admin put on the radio
+  let positionRaw = null, deviceRaw = null, mqttCfg = null, setupChecked = false; // for the setup the admin put on the radio
   let loraRaw = null, region = -1, preset = -1, usePreset = true; // LoRa settings of the radio; region 0 = not set (silent)
   let pausedForVideo = false, retry = 0, retryTimer = null, pollTimer = null;
   let draining = false, drainAgain = false, writeChain = Promise.resolve(), httpFails = 0;
@@ -301,7 +301,7 @@
   async function radioSetup() {
     let j = {};
     try { j = await fetch('takweb-server.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : {})); } catch (e) { return; }
-    const r = P.setupPackets(myNode, j.setup, { channels, loraRaw, region, positionRaw, mqtt: mqttCfg, networkRaw });
+    const r = P.setupPackets(myNode, j.setup, { channels, loraRaw, region, positionRaw, deviceRaw, mqtt: mqttCfg, networkRaw });
     if (!r.packets.length) return;
     // never a restart loop: the same setup is tried at most twice in 15 minutes (a radio that does not keep a value
     // would otherwise restart at every page start)
@@ -388,6 +388,7 @@
     if (m.kind === 'myInfo') myNode = m.nodeNum;
     else if (m.kind === 'config' && m.network) networkRaw = m.network;
     else if (m.kind === 'config' && m.position) positionRaw = m.position;
+    else if (m.kind === 'config' && m.device) deviceRaw = m.device;
     else if (m.kind === 'moduleConfig' && m.mqtt) mqttCfg = m.mqtt;
     else if (m.kind === 'config' && m.lora) { loraRaw = m.lora; region = m.region; preset = m.preset; usePreset = m.usePreset; }
     else if (m.kind === 'channel') {

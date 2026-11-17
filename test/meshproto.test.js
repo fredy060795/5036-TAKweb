@@ -120,16 +120,35 @@ test('setup from the admin: only what differs is sent to the radio (channel, alw
   assert.ok(r.packets.length >= 4);
   // a radio that is set already: nothing (no restart on every page load)
   const done = {
-    channels: [{ role: 1, name: 'TAK' }], loraRaw: W().uint(7, 3).bool(12, true).bool(105, true).done(), region: 3,
+    channels: [{ role: 1, name: 'TAK' }], loraRaw: W().uint(7, 3).bool(12, true).bool(13, true).bool(105, true).done(), region: 3,
     positionRaw: W().uint(1, 120).bool(2, true).uint(13, 1).done(), mqtt: { enabled: true, address: 'tak.example.org:8883', username: 'm' },
     networkRaw: W().bool(1, true).str(3, 'HQ').done(),
   };
   assert.deepEqual(P.setupPackets(9, setup, done).what, []);
   // only the duty-cycle override missing (no channel in the setup)
   r = P.setupPackets(9, { gpsSecs: 120 }, { ...done, loraRaw: W().uint(7, 3).done() });
-  assert.deepEqual(r.what, ['always send']);
+  assert.deepEqual(r.what, ['full power, always send']);
   // GPS pins set by hand: cleared
   assert.deepEqual(P.setupPackets(9, { gpsSecs: 120 }, { ...done, positionRaw: W().uint(1, 120).uint(12, 3).uint(13, 1).done() }).what, ['GPS']);
+  // reduced transmit power: back to the maximum (tx_power 0), RX boost on
+  r = P.setupPackets(9, { gpsSecs: 120 }, { ...done, loraRaw: W().uint(7, 3).int(10, 10).bool(12, true).bool(13, true).bool(105, true).done() });
+  assert.deepEqual(r.what, ['full power, always send']);
+  const lf = P.decode(P.decode(P.decode(P.decode(r.packets[0]).get(1)[0].v).get(4)[0].v).get(2)[0].v);
+  const lora = P.decode(P.decode(lf.get(34)[0].v).get(6)[0].v);
+  assert.ok(!lora.has(10), 'tx_power 0 = region maximum');
+  assert.equal(lora.get(13)[0].v, 1, 'RX boosted gain');
+  // role TAK for field radios: set once, then left alone
+  r = P.setupPackets(9, { role: 'tak' }, { ...done, deviceRaw: new Uint8Array(0) });
+  assert.deepEqual(r.what, ['role TAK']);
+  assert.deepEqual(P.setupPackets(9, { role: 'tak' }, { ...done, deviceRaw: W().uint(1, 7).done() }).what, []);
+  assert.deepEqual(P.setupPackets(9, { role: 'client' }, { ...done, deviceRaw: W().uint(1, 7).done() }).what, ['role CLIENT']);
+  // all channels of the server as one link: primary + secondary; a missing secondary is put on the radio
+  const link2 = 'https://meshtastic.org/e/#' + Buffer.from(W().msg(1, W().bytes(2, new Uint8Array(32).fill(6), true).str(3, 'OPS')).done()).toString('base64url');
+  const all = P.mergeChannelUrls([link, link2, link]);
+  assert.deepEqual(P.parseChannelUrl(all).names, ['TAK', 'OPS']);
+  assert.ok(P.parseChannelUrl(all).lora, 'LoRa settings of the first link');
+  assert.deepEqual(P.setupPackets(9, { channel: all }, done).what, ['channel TAK, OPS']);
+  assert.deepEqual(P.setupPackets(9, { channel: all }, { ...done, channels: [{ index: 0, role: 1, name: 'TAK' }, { index: 1, role: 2, name: 'OPS' }] }).what, []);
   // moduleConfig from the radio is read
   const fr = W().msg(9, W().msg(1, W().bool(1, true).str(2, 'a:8883').str(3, 'u'))).done();
   assert.deepEqual(P.parseFromRadio(fr), { kind: 'moduleConfig', mqtt: { enabled: true, address: 'a:8883', username: 'u' } });
