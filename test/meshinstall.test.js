@@ -109,8 +109,9 @@ test('meshsite lite (weak radios, plain http): one page with the basic functions
   assert.ok(scripts.every(x => !/<!--/.test(x)), 'no <!-- in inline scripts');
   // the radio page of the other radios is unchanged
   assert.ok(meshsite.build('9.9.9').files.length > 10);
-  assert.ok(meshsite.LITE_TARGET.test('heltec-wireless-tracker') && meshsite.LITE_TARGET.test('heltec-wireless-tracker-V1-0'));
-  assert.ok(!meshsite.LITE_TARGET.test('seeed-xiao-s3') && !meshsite.LITE_TARGET.test('heltec-v3'));
+  // radios whose Meshtastic build has no PSRAM get the lite page, the ones with PSRAM the full one
+  for (const t of ['heltec-v2_0', 'heltec-v2_1', 'tbeam', 'tlora-v2-1-1_6', 'heltec-v3', 'heltec-wsl-v3', 'heltec-wireless-tracker-V1-0', 'heltec-wireless-tracker', 'heltec-wireless-tracker-v2']) assert.ok(meshsite.LITE_TARGET.test(t), t);
+  for (const t of ['seeed-xiao-s3', 'tlora-t3s3-v1', 'tbeam-s3-core']) assert.ok(!meshsite.LITE_TARGET.test(t), t);
 });
 
 test('installer: removes the old web files, writes TAKweb, checks the sizes, sets the WLAN, restarts', async () => {

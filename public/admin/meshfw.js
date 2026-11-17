@@ -9,7 +9,7 @@ const bar = p => { $('fwBar').classList.remove('hidden'); $('fwFill').style.widt
 const mb = n => (n / 1048576).toFixed(1) + ' MB';
 const hex = n => '0x' + n.toString(16);
 let versions = [];
-const LITE_TARGET = /^heltec-wireless-tracker/i; // like lib/meshsite.js
+const LITE_TARGET = /^(heltec-wireless-tracker|heltec-v3|heltec-wsl-v3|heltec-v2|tlora-v2|tbeam$)/i; // like lib/meshsite.js
 // how the phone opens TAKweb on this radio: weak radios (lite) only over plain http
 const openText = d => LITE_TARGET.test((d && d.target) || '')
   ? 'http://192.168.4.1 (this radio offers TAKweb only over http – no camera, voice or QR scan; the position comes from its GPS)'
