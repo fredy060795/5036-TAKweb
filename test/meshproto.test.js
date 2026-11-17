@@ -120,7 +120,7 @@ test('setup from the admin: only what differs is sent to the radio (channel, alw
   assert.ok(r.packets.length >= 4);
   // a radio that is set already: nothing (no restart on every page load)
   const done = {
-    channels: [{ role: 1, name: 'TAK' }], loraRaw: W().uint(7, 3).bool(12, true).bool(13, true).bool(105, true).done(), region: 3,
+    channels: [{ role: 1, name: 'TAK' }], loraRaw: W().uint(7, 3).int(10, 30).bool(12, true).bool(13, true).bool(105, true).done(), region: 3,
     positionRaw: W().uint(1, 120).bool(2, true).uint(13, 1).done(), mqtt: { enabled: true, address: 'tak.example.org:8883', username: 'm' },
     networkRaw: W().bool(1, true).str(3, 'HQ').done(),
   };
@@ -130,12 +130,12 @@ test('setup from the admin: only what differs is sent to the radio (channel, alw
   assert.deepEqual(r.what, ['full power, always send']);
   // GPS pins set by hand: cleared
   assert.deepEqual(P.setupPackets(9, { gpsSecs: 120 }, { ...done, positionRaw: W().uint(1, 120).uint(12, 3).uint(13, 1).done() }).what, ['GPS']);
-  // reduced transmit power: back to the maximum (tx_power 0), RX boost on
+  // reduced transmit power: back to 30 dBm (the app's maximum), RX boost on
   r = P.setupPackets(9, { gpsSecs: 120 }, { ...done, loraRaw: W().uint(7, 3).int(10, 10).bool(12, true).bool(13, true).bool(105, true).done() });
   assert.deepEqual(r.what, ['full power, always send']);
   const lf = P.decode(P.decode(P.decode(P.decode(r.packets[0]).get(1)[0].v).get(4)[0].v).get(2)[0].v);
   const lora = P.decode(P.decode(lf.get(34)[0].v).get(6)[0].v);
-  assert.ok(!lora.has(10), 'tx_power 0 = region maximum');
+  assert.equal(lora.get(10)[0].v, 30, 'tx_power 30 dBm');
   assert.equal(lora.get(13)[0].v, 1, 'RX boosted gain');
   // role TAK for field radios: set once, then left alone
   r = P.setupPackets(9, { role: 'tak' }, { ...done, deviceRaw: new Uint8Array(0) });

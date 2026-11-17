@@ -335,12 +335,13 @@
     adminPacket(node, new Writer().msg(33, new Writer().int(1, index).bytes(2, settingsRaw, true).uint(3, role)));
   // the LoRa settings of a link; a link without region keeps the radio's region. TAKweb radios are crisis radios:
   // override_duty_cycle (12) always on – they send whatever the channel load
-  // Full transmit power: tx_power (10) = 0 is the maximum the region allows (the radio limits it to its chip, e.g.
-  // 22 dBm SX1262), sx126x_rx_boosted_gain (13) on – hears weaker radios
+  // Full transmit power: tx_power (10) = 30 dBm like the maximum in the Meshtastic app (the firmware limits it to what
+  // the region allows and the chip can, e.g. 27 dBm EU_868 / 22 dBm SX1262), sx126x_rx_boosted_gain (13) on
+  const TX_POWER_MAX = 30;
   function adminSetLora(node, loraRaw, keepRegion) {
     const lf = decode(loraRaw || new Uint8Array(0));
     // config_ok_to_mqtt (105): the radio's packets may go to the server (MQTT gateway)
-    const lora = withoutFields(loraRaw, u32(lf, 7) ? [10, 12, 13, 105] : [7, 10, 12, 13, 105]).bool(12, true).bool(13, true).bool(105, true);
+    const lora = withoutFields(loraRaw, u32(lf, 7) ? [10, 12, 13, 105] : [7, 10, 12, 13, 105]).int(10, TX_POWER_MAX).bool(12, true).bool(13, true).bool(105, true);
     if (!u32(lf, 7) && keepRegion) lora.uint(7, keepRegion);
     return adminPacket(node, new Writer().msg(34, new Writer().msg(6, lora)));
   }
@@ -401,7 +402,7 @@
       } catch (e) { /* not a link */ }
     }
     const lf = decode(radio.loraRaw || new Uint8Array(0));
-    if (!chanDone && radio.loraRaw && (!u32(lf, 12) || !u32(lf, 105) || u32(lf, 10) || !u32(lf, 13))) {
+    if (!chanDone && radio.loraRaw && (!u32(lf, 12) || !u32(lf, 105) || u32(lf, 10) !== TX_POWER_MAX || !u32(lf, 13))) {
       out.push(adminSetLora(node, radio.loraRaw, radio.region > 0 ? radio.region : REGIONS.EU_868));
       what.push('full power, always send');
     }
