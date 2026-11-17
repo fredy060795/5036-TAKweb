@@ -45,7 +45,7 @@ test('decodes FromRadio: TAK packet, text, my info, node, channel, config comple
   assert.deepEqual(P.parseFromRadio(bytes('1a060898f5f2f60f')), { kind: 'myInfo', nodeNum: 0xfedcba98 });
   assert.deepEqual(P.parseFromRadio(bytes('223808d209121a0a09213030303030346432120948616e73204d6573681a02484d1a120d00389c1c15c071b50418ac022500f153652d64f15365')), {
     kind: 'nodeInfo',
-    node: { num: 1234, user: { id: '!000004d2', longName: 'Hans Mesh', shortName: 'HM' }, position: { lat: 48, lon: 7.9, alt: 300, time: 1700000000, speed: null, course: null }, lastHeard: 1700000100 },
+    node: { num: 1234, user: { id: '!000004d2', longName: 'Hans Mesh', shortName: 'HM' }, position: { lat: 48, lon: 7.9, alt: 300, time: 1700000000, speed: null, course: null }, lastHeard: 1700000100, snr: null, hops: null },
   });
   assert.deepEqual(P.parseFromRadio(bytes('52120801120c1201011a07416972736f66741802')), { kind: 'channel', channel: { index: 1, role: 2, name: 'Airsoft', key: 'default' } });
   assert.deepEqual(P.parseFromRadio(bytes('3863')), { kind: 'configComplete', id: 99 });
@@ -149,6 +149,11 @@ test('setup from the admin: only what differs is sent to the radio (channel, alw
   assert.ok(P.parseChannelUrl(all).lora, 'LoRa settings of the first link');
   assert.deepEqual(P.setupPackets(9, { channel: all }, done).what, ['channel TAK, OPS']);
   assert.deepEqual(P.setupPackets(9, { channel: all }, { ...done, channels: [{ index: 0, role: 1, name: 'TAK' }, { index: 1, role: 2, name: 'OPS' }] }).what, []);
+  // reception of a packet: SNR and hops (hop_start - hop_limit); node info: snr, hops_away
+  const pk = P.parseFromRadio(W().msg(2, W().fixed(1, 0x1234).fixed(2, 0xffffffff).fixed(8, new Uint32Array(new Float32Array([-7.25]).buffer)[0]).uint(9, 2).uint(15, 5)).done());
+  assert.deepEqual([pk.packet.snr, pk.packet.hops], [-7.25, 3]);
+  const ni = P.parseFromRadio(W().msg(4, W().uint(1, 7).fixed(4, new Uint32Array(new Float32Array([5.5]).buffer)[0]).uint(9, 1)).done());
+  assert.deepEqual([ni.node.snr, ni.node.hops], [5.5, 1]);
   // moduleConfig from the radio is read
   const fr = W().msg(9, W().msg(1, W().bool(1, true).str(2, 'a:8883').str(3, 'u'))).done();
   assert.deepEqual(P.parseFromRadio(fr), { kind: 'moduleConfig', mqtt: { enabled: true, address: 'a:8883', username: 'u' } });

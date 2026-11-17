@@ -399,6 +399,8 @@
       if (m.node.user) n.user = m.node.user;
       if (m.node.position) n.position = m.node.position;
       n.lastHeard = Math.max(n.lastHeard || 0, m.node.lastHeard || 0);
+      if (m.node.snr != null && m.node.snr !== 0) n.snr = m.node.snr;
+      if (m.node.hops != null) n.hops = m.node.hops;
       showNode(m.node.num);
     } else if (m.kind === 'configComplete' && m.id === nonce) {
       retry = 0;
@@ -411,6 +413,14 @@
     } else if (m.kind === 'rebooted') {
       write(P.wantConfig(nonce)).then(drain).catch(() => {});
     } else if (m.kind === 'packet') {
+      // how this radio heard the sender (also for packets it cannot read)
+      const pk = m.packet;
+      if (pk.from && pk.from !== myNode && (pk.snr != null || pk.hops != null)) {
+        const n = node(pk.from);
+        if (pk.snr != null && pk.snr !== 0) n.snr = Math.round(pk.snr * 4) / 4;
+        if (pk.hops != null) n.hops = pk.hops;
+        n.lastHeard = Math.floor(Date.now() / 1000);
+      }
       receive(m.packet);
     }
     if (popupOpen()) render();
@@ -471,7 +481,7 @@
     if (!heard || Date.now() / 1000 - heard > NODE_MAX_AGE) return; // no time known: not shown as current
     const it = window.eud.items.get('MESH-' + P.nodeId(num));
     if (it && it.c.time > heard * 1000) return; // nothing newer than what the map has
-    handleCot(P.nodeCot({ num, user: n.user, position: n.position, heard }));
+    fromMesh(P.nodeCot({ num, user: n.user, position: n.position, heard })); // shown here and passed to the TAK server
   }
 
   // ---------------- Sending ----------------
@@ -691,7 +701,10 @@
 
   async function bridgeUp(xml, k, direct = false) {
     if (!cfg.bridge || xml.includes('<' + MARK) || !live(xml)) return; // came from the server through another gateway / old
-    if (k.type === 'a-f-G-E-S' || k.uid.startsWith('MESH-')) return; // plain Meshtastic, not TAK
+    // plain Meshtastic radios go to the TAK server too: the mesh only has its own channels, so everyone sees everyone –
+    // but not while this radio is on the public default key (then the radios of strangers would be on every ATAK)
+    const plain = k.type === 'a-f-G-E-S' || k.uid.startsWith('MESH-');
+    if (plain && channels.some(c => c.role && (c.key === 'default' || c.key === 'none'))) return;
     if (k.type === 'b-t-f' && !direct && !xml.includes('.' + P.ALL_CHAT + '.')) return; // direct message to us: not for the server
     if (pendingUp.has(k.key)) return;
     pendingUp.add(k.key);
@@ -699,7 +712,13 @@
     pendingUp.delete(k.key);
     if (!window.eud.serverOnline() || seenIn(seenServer, k)) return; // the TAK server has it already
     seenServer.set(k.key, Date.now());
-    window.eud.forwardCot(marked(xml).replace(`<${MARK}/>`, `<${MARK} gw="${window.eud.esc(profile.uid)}"/>`)); // which gateway passed it on (admin → Network)
+    // which gateway passed it on (admin → Network); for a plain radio also how it was heard here (hops, SNR)
+    let q = '';
+    const mm = plain && /^MESH-!([0-9a-f]{8})$/.exec(k.uid);
+    const hn = mm ? nodes.get(parseInt(mm[1], 16)) : null;
+    if (hn && hn.hops != null) q += ` hops="${hn.hops}"`;
+    if (hn && hn.snr != null) q += ` snr="${hn.snr}"`;
+    window.eud.forwardCot(marked(xml).replace(`<${MARK}/>`, `<${MARK} gw="${window.eud.esc(profile.uid)}"${q}/>`));
   }
 
   let downChain = Promise.resolve(), downQueued = 0;
