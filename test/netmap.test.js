@@ -35,6 +35,9 @@ test('netmap: route of a CoT – own internet, phone gateway (LoRa), MQTT', () =
   assert.deepEqual(n.net, { radio: 'ble', bridge: true, node: '00c0ffee' });
   assert.equal(hexId('!C0FFEE'), '00c0ffee');
   assert.equal(hexId('PHONE'), '');
+  // a plain radio heard by a TAKweb phone: how it was heard
+  const h = route(pli('MESH-!00c0ffee', 1, 1, '<__takwebmesh gw="PHONE-1" hops="2" snr="-7.5"/>'));
+  assert.deepEqual([h.link, h.via, h.hops, h.snr], ['lora', 'PHONE-1', 2, -7.5]);
 });
 
 test('netmap: gateways, mesh-only devices and their lines', () => {

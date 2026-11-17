@@ -93,6 +93,7 @@
   const has = (f, n) => f.has(n);
   const u32 = (f, n) => { const x = one(f, n); return x && x.wt === 0 ? x.v : 0; };
   const i32 = (f, n) => u32(f, n) | 0;
+  const float = (f, n) => { const x = one(f, n); return x && x.wt === 5 ? new DataView(x.v.buffer, x.v.byteOffset, 4).getFloat32(0, true) : null; };
   const fixed = (f, n, signed) => {
     const x = one(f, n);
     if (!x || x.wt !== 5) return 0;
@@ -171,6 +172,8 @@
     const d = sub(f, 4);
     return {
       from: fixed(f, 1), to: fixed(f, 2), channel: u32(f, 3), id: fixed(f, 6), rxTime: fixed(f, 7),
+      // reception: rx_snr (8), hops = hop_start (15) - hop_limit (9) when the sender filled hop_start
+      snr: float(f, 8), hops: has(f, 15) ? Math.max(0, u32(f, 15) - u32(f, 9)) : null,
       portnum: d ? u32(d, 1) : 0, payload: d ? bytes(d, 2) || new Uint8Array(0) : null, // null = encrypted (not for us)
     };
   }
@@ -181,7 +184,7 @@
     if (has(f, 3)) return { kind: 'myInfo', nodeNum: u32(sub(f, 3), 1) };
     if (has(f, 4)) {
       const n = sub(f, 4);
-      return { kind: 'nodeInfo', node: { num: u32(n, 1), user: parseUser(sub(n, 2)), position: parsePosition(sub(n, 3)), lastHeard: fixed(n, 5) } };
+      return { kind: 'nodeInfo', node: { num: u32(n, 1), user: parseUser(sub(n, 2)), position: parsePosition(sub(n, 3)), lastHeard: fixed(n, 5), snr: float(n, 4), hops: has(n, 9) ? u32(n, 9) : null } };
     }
     if (has(f, 10)) {
       const c = sub(f, 10), s = sub(c, 2);
