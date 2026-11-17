@@ -45,7 +45,7 @@ test('decodes FromRadio: TAK packet, text, my info, node, channel, config comple
   assert.deepEqual(P.parseFromRadio(bytes('1a060898f5f2f60f')), { kind: 'myInfo', nodeNum: 0xfedcba98 });
   assert.deepEqual(P.parseFromRadio(bytes('223808d209121a0a09213030303030346432120948616e73204d6573681a02484d1a120d00389c1c15c071b50418ac022500f153652d64f15365')), {
     kind: 'nodeInfo',
-    node: { num: 1234, user: { id: '!000004d2', longName: 'Hans Mesh', shortName: 'HM' }, position: { lat: 48, lon: 7.9, alt: 300, time: 1700000000, speed: null, course: null }, lastHeard: 1700000100, snr: null, hops: null },
+    node: { num: 1234, user: { id: '!000004d2', longName: 'Hans Mesh', shortName: 'HM' }, position: { lat: 48, lon: 7.9, alt: 300, time: 1700000000, speed: null, course: null }, lastHeard: 1700000100, snr: null, hops: null, channel: 0 },
   });
   assert.deepEqual(P.parseFromRadio(bytes('52120801120c1201011a07416972736f66741802')), { kind: 'channel', channel: { index: 1, role: 2, name: 'Airsoft', key: 'default' } });
   assert.deepEqual(P.parseFromRadio(bytes('3863')), { kind: 'configComplete', id: 99 });

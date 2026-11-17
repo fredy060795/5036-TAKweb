@@ -184,7 +184,7 @@
     if (has(f, 3)) return { kind: 'myInfo', nodeNum: u32(sub(f, 3), 1) };
     if (has(f, 4)) {
       const n = sub(f, 4);
-      return { kind: 'nodeInfo', node: { num: u32(n, 1), user: parseUser(sub(n, 2)), position: parsePosition(sub(n, 3)), lastHeard: fixed(n, 5), snr: float(n, 4), hops: has(n, 9) ? u32(n, 9) : null } };
+      return { kind: 'nodeInfo', node: { num: u32(n, 1), user: parseUser(sub(n, 2)), position: parsePosition(sub(n, 3)), lastHeard: fixed(n, 5), snr: float(n, 4), hops: has(n, 9) ? u32(n, 9) : null, channel: u32(n, 7) } };
     }
     if (has(f, 10)) {
       const c = sub(f, 10), s = sub(c, 2);
