@@ -443,6 +443,26 @@
       </details>
     </section>
     <section class="card" data-view="mesh">
+      <h2>Update TAKweb on a radio over WLAN <span class="mut small">(no USB – also older radios without the update button)</span></h2>
+      <p class="mut small">Writes the current TAKweb page of this server onto a radio that already runs the TAKweb firmware. The radio's
+        server address, TAK user and WLAN stay. 1. load the page while this PC has internet, 2. connect the PC's WLAN to the radio
+        (<b>TAKweb-xxxx</b>), 3. write. Chrome/Edge: allow "devices on your local network" when asked.</p>
+      <div class="row">
+        <div class="grow"><label>Radio address</label><input id="wuAddr" value="192.168.4.1" autocomplete="off"></div>
+        <div class="grow"><label>Page for</label><select id="wuKind">
+          <option value="auto">automatic (from the files on the radio)</option>
+          <option value="lite">weak radio without PSRAM (one file, http only)</option>
+          <option value="small">normal radio (small world map)</option>
+          <option value="full">ESP32-S3 radio (detailed world map)</option>
+        </select></div>
+      </div>
+      <div class="row"><button type="button" id="wuLoad">1. Load the TAKweb page (v<span id="wuVer">…</span>)</button>
+        <button type="button" id="wuCheck">Check the radio</button>
+        <button type="button" class="pri" id="wuGo" disabled>3. Write onto the radio</button></div>
+      <div class="mf-bar hidden" id="wuBar"><div id="wuFill"></div></div>
+      <p class="msg" id="wuMsg"></p>
+    </section>
+    <section class="card" data-view="mesh">
       <details>
         <summary><b>Advanced: put only TAKweb onto a radio with normal Meshtastic firmware</b> <span class="mut small">(the radio joins a phone hotspot)</span></summary>
       <p class="mut small">Puts the TAKweb app onto the radio's flash. In the field the radio joins a phone's hotspot; the phone opens
@@ -733,5 +753,6 @@
 <script src="/eud/meshinstall.js"></script>
 <script src="meshflash.js"></script>
 <script type="module" src="meshfw.js"></script>
+<script type="module" src="meshwlan.js"></script>
 </body>
 </html>

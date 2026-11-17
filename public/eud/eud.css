@@ -485,3 +485,7 @@ body.takweb-lite .tile[data-tb="video"], body.takweb-lite .tile[data-tb="voice"]
 body.takweb-lite [data-tbtool="voice"], body.takweb-lite [data-tbtool="video"], body.takweb-lite #scanBtn, body.takweb-lite #permBar { display: none !important; }
 /* video (camera, helmet camera, watching feeds) through the TAKweb server named on the radio – over the phone's internet */
 body.mesh-only:not(.radio-relay) #btnVideo, body.mesh-only:not(.radio-relay) [data-tbtool="voice"], body.mesh-only:not(.radio-relay) [data-tbtool="video"], body.mesh-only #appBox { display: none !important; }
+
+/* Settings: page update on the radio – progress */
+#radioUpd .nw-bar { height: 6px; background: rgba(255, 255, 255, 0.15); border-radius: 3px; margin: 6px 0; overflow: hidden; }
+#radioUpd .nw-bar > div { height: 100%; width: 0; background: #4caf50; transition: width 0.2s; }
